@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <thread>
 
 using namespace Nexus::Base;
 
@@ -17,7 +18,7 @@ bool HeapAllocator::recycle(char *ptr, uint64_t size) {
     return true;
 }
 
-char *HeapAllocator::reallocate(char *old_ptr, uint64_t old_size, uint64_t new_size) {
+char *HeapAllocator::reallocate(char* old_ptr, uint64_t old_size, uint64_t new_size) {
     char* ptr;
     if ((ptr = reinterpret_cast<char*>(realloc(old_ptr, new_size))) == nullptr) {
         throw std::bad_alloc();
@@ -83,6 +84,7 @@ template<typename A> requires IsAllocator<A>
 bool UniquePool<A>::expand(uint64_t new_capacity) {
     if (settings_.auto_expand) {
         memptr_ = allocator_.reallocate(memptr_, capacity_, new_capacity);
+        capacity_ = new_capacity;
         return true;
     }
     return false;
@@ -127,6 +129,144 @@ void UniquePool<A>::rewind() {
     position_ = 0;
 }
 
+
+
+
+/* Implement of SharedPool */
+template<typename A> requires IsAllocator<A>
+SharedPool<A>::SharedPool(uint64_t capacity) : allocator_(A()), mtx(new std::shared_mutex) {
+    *capacity_ = capacity;
+    memholder_ = reinterpret_cast<char**>(allocator_.allocate(8));
+    *memholder_ = allocator_.allocate(capacity);
+}
+
+template<typename A>requires IsAllocator<A>
+SharedPool<A>::SharedPool(char *memptr, uint64_t size) :  allocator_(A()), mtx(new std::shared_mutex) {
+    *capacity_ = size;
+    memholder_ = reinterpret_cast<char**>(allocator_.allocate(8));
+    *memholder_ =  memptr;
+}
+
+template<typename A> requires IsAllocator<A>
+SharedPool<A>::SharedPool(const SharedPool &up) : allocator_(up.allocator_), capacity_(up.capacity_), memholder_(up.memholder_), mtx(up.mtx), settings_((up.settings_)) {
+    if (!adjust_refcount(1)) {
+        throw std::runtime_error("Coping SharedPool when being destructed.");
+    }
+}
+
+template<typename A> requires IsAllocator<A>
+template<typename T> requires IsSimpleType<T>
+Nexus::Check::mayfail<T> SharedPool<A>::next() {
+    constexpr auto step = sizeof(T);
+    mtx->lock_shared();
+    if (position_ + step > *capacity_) {
+        flag_ = flag_t::eof;
+        mtx->unlock_shared();
+        return Nexus::Check::failed;
+    }
+    T d{};
+    memcpy(&d, *memholder_ + position_, step);
+    mtx->unlock_shared();
+    position_ += step;
+    return d;
+}
+
+template<typename A> requires IsAllocator<A>
+template<typename T> requires IsSimpleType<T>
+bool SharedPool<A>::next(T t) {
+    constexpr auto step = sizeof(T);
+    mtx->lock();
+    if (position_ + step > *capacity_) {
+        if (settings_.auto_expand) {
+            expand(step > single_automatic_expand_length ? position_ + step : position_ + single_automatic_expand_length);
+        } else {
+            flag_ = flag_t::eof;
+            mtx->unlock();
+            return false;
+        }
+    }
+    memcpy(*memholder_ + position_, &t, step);
+    mtx->unlock();
+    position_ += step;
+    return true;
+}
+
+template<typename A> requires IsAllocator<A>
+void SharedPool<A>::apply_settings(const SharedPool::settings &settings) {
+    settings_ = settings;
+}
+
+template<typename A> requires IsAllocator<A>
+bool SharedPool<A>::expand(uint64_t new_capacity) {
+    if (settings_.auto_expand) {
+        *memholder_ = allocator_.reallocate(*memholder_, *capacity_, new_capacity);
+        *capacity_ = new_capacity;
+        return true;
+    }
+    return false;
+}
+
+template<typename A> requires IsAllocator<A>
+SharedPool<A>::~SharedPool() {
+    release();
+}
+
+template<typename A> requires IsAllocator<A>
+void SharedPool<A>::release() {
+    if (memholder_ != nullptr) {
+        if (!adjust_refcount(-1)) {
+            allocator_.recycle(*memholder_, *capacity_);
+            delete memholder_;
+            memholder_ = nullptr;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10)); // wait 10ms to make sure all the conflicting threads could pass.
+            delete mtx;
+            delete reference_counting;
+            delete capacity_;
+            std::cout << "Free" <<std::endl;
+        }
+        memholder_ = nullptr;
+    }
+}
+
+template<typename A> requires IsAllocator<A>
+void SharedPool<A>::close() {
+    release();
+}
+
+template<typename A> requires IsAllocator<A>
+SharedPool<A>::flag_t SharedPool<A>::flag() {
+    SharedPool::flag_t result;
+    return result;
+}
+
+template<typename A> requires IsAllocator<A>
+void SharedPool<A>::position(uint64_t npos) {
+    position_ = npos;
+}
+
+template<typename A> requires IsAllocator<A>
+uint64_t SharedPool<A>::position() {
+    return position_;
+}
+
+template<typename A> requires IsAllocator<A>
+void SharedPool<A>::rewind() {
+    position_ = 0;
+}
+
+template<typename A> requires IsAllocator<A>
+bool SharedPool<A>::adjust_refcount(int refcount) {
+    mtx->lock();
+    if (*reference_counting <= 0) {
+        return false;
+    }
+    *reference_counting += refcount;
+    if (*reference_counting == 0) {
+        return false;
+    }
+    mtx->unlock();
+    return true;
+}
 
 
 /* Implements for Stream */

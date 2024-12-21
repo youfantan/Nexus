@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <concepts>
+#include <shared_mutex>
 #include "check.h"
 
 namespace Nexus::Base {
@@ -41,16 +42,26 @@ namespace Nexus::Base {
     private:
         C container_;
     public:
+        /* Construct stream with a reference of container. */
         explicit Stream(const C& container);
+        /* Construct stream with a right reference of container. */
         explicit Stream(C&& container);
+        /* Read the next data. */
         template<typename T> requires IsSimpleType<T>
         Nexus::Check::mayfail<T> next();
+        /* Write the next data. */
         template<typename T> requires IsSimpleType<T>
         bool next(T t);
+        /* Rewind the container. */
         void rewind();
+        /* Get the position of container. */
         uint64_t position();
+        /* Set the position of container. */
         void position(uint64_t npos);
+        /* Get the last operation flag of container. */
         C::flag_t flag();
+        /* Call this function only when you need to release the container before Stream destruction automatically. When Stream is being
+         * destructed, it will close the container.  */
         void close();
         ~Stream();
     };
@@ -97,12 +108,67 @@ namespace Nexus::Base {
         /* Apply settings for UniquePool */
         void apply_settings(const settings& settings);
         bool expand(uint64_t new_capacity);
-        /* Call this function only when you need to release the memory data before class destruction automatically. When UniquePool is being
+        /* Call this function only when you need to release the memory data before UniquePool destruction automatically. When UniquePool is being
          * destructed, it will release the memory pointer if the auto_free flag in settings_ is true.*/
         void release();
         ~UniquePool();
 
-        /* Functions for streaming operation */
+
+        template<typename T> requires IsSimpleType<T>
+        Nexus::Check::mayfail<T> next();
+        template<typename T> requires IsSimpleType<T>
+        bool next(T t);
+        void rewind();
+        uint64_t position();
+        void position(uint64_t npos);
+        flag_t flag();
+        void close();
+    };
+
+    /*
+     * SharedPool provides a safe container to manage memory, which ensures that only one running thread can hold it at any time.
+     * To ensure flexibility, this class provides an optional template parameter A for using different memory allocation methods.
+     * */
+    template<typename A = HeapAllocator> requires IsAllocator<A>
+    class SharedPool {
+    public:
+        static constexpr uint64_t single_automatic_expand_length = 1024;
+        struct settings {
+            char auto_expand:1;
+            char reserved:7;
+        };
+        enum class flag_t {
+            eof
+        };
+    private:
+        char** memholder_;
+        uint64_t* capacity_{new uint64_t(0)};
+        A allocator_;
+        settings settings_{1, 0};
+        uint64_t position_{0};
+        int64_t* reference_counting{new int64_t (1)};
+        std::shared_mutex* mtx;
+        flag_t flag_;
+    public:
+        /* Allocate a new SharedPool with given capacity. */
+        explicit SharedPool(uint64_t capacity);
+        /* Use SharedPool to manage a pointer and carefully confirm the life cycle of the pointer. */
+        SharedPool(char* memptr, uint64_t size);
+        /* SharedPool can be copied. */
+        SharedPool(const SharedPool& up);
+        /* SharedPool cannot be moved. */
+        SharedPool(SharedPool&& up) = delete;
+        /* Apply settings for UniquePool */
+        void apply_settings(const settings& settings);
+        /* Adjust the reference counter; Pass positive value to increase the value and negative value to decrease the value. */
+        bool adjust_refcount(int refcount);
+        bool expand(uint64_t new_capacity);
+        /* Call this function only when you need to release the memory data before SharedPool destruction automatically. When SharedPool is being
+         * destructed, it will release the memory pointer if the auto_free flag in settings_ is true.*/
+        void release();
+        ~SharedPool();
+
+
         template<typename T> requires IsSimpleType<T>
         Nexus::Check::mayfail<T> next();
         template<typename T> requires IsSimpleType<T>

@@ -6,7 +6,6 @@
 using namespace Nexus::Base;
 using namespace Nexus::Check;
 
-
 struct test {
     int k;
     float a;
@@ -23,11 +22,25 @@ mayfail<char[3]> wq(bool i) {
 }
 
 int main() {
-    UniquePool up(1024);
-    Stream<UniquePool<HeapAllocator>> stream(std::move(up));
-    stream.next(test{12, 1234.f, {1, 2, 3}});
+    SharedPool up(4);
+    for (int i = 1; i < 5; ++i) {
+        std::thread tr ([&up, i]() {
+            auto stream = Stream(up);
+            stream.position((i - 1) * 4096);
+            for (int j = 0; j < 1024; ++j) {
+                bool b = stream.next(i);
+            }
+            std::cout << "finished" << std::endl;
+        });
+        tr.join();
+    }
+    uint64_t accmu = 0;
+    auto stream = Stream(up);
     stream.rewind();
-    auto k = stream.next<int>();
-    auto a = stream.next<float>();
-    auto w = stream.next<char[3]>();
+    auto wq = stream.next<int>();
+    for (int i = 0; i < 4096; ++i) {
+        accmu += wq.result();
+        wq = stream.next<int>();
+    }
+    auto dwe = stream.next<int>();
 }
