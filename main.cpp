@@ -1,46 +1,26 @@
-#include <iostream>
-
-#include "include/memory.h"
-#include "include/check.h"
-
+#include "include/mem/memory.h"
+#include "include/io/socket.h"
+#include "include/utils/unexpected.h"
+#include "include/platform/win32/win32_net.h"
+#include "include/utils/netaddr.h"
+#include <thread>
 using namespace Nexus::Base;
-using namespace Nexus::Check;
-
-struct test {
-    int k;
-    float a;
-    char w[3];
-};
-
-mayfail<char[3]> wq(bool i) {
-    if (i) {
-        char arr[3] = {1, 2, 3};
-        return arr;
-    } else {
-        return failed;
-    }
-}
+using namespace Nexus::Utils;
+using namespace Nexus::Net;
 
 int main() {
-    SharedPool up(4);
-    for (int i = 1; i < 5; ++i) {
-        std::thread tr ([&up, i]() {
-            auto stream = Stream(up);
-            stream.position((i - 1) * 4096);
-            for (int j = 0; j < 1024; ++j) {
-                bool b = stream.next(i);
-            }
-            std::cout << "finished" << std::endl;
-        });
-        tr.join();
+    WSAData wsadat;
+    if (WSAStartup(MAKEWORD(2,2), &wsadat) != 0) {
+        BREAKPOINTM("Error at initialize WSA");
     }
-    uint64_t accmu = 0;
-    auto stream = Stream(up);
-    stream.rewind();
-    auto wq = stream.next<int>();
-    for (int i = 0; i < 4096; ++i) {
-        accmu += wq.result();
-        wq = stream.next<int>();
-    }
-    auto dwe = stream.next<int>();
+    Socket server(SockType::IPPROTO_IPV4);
+    server.bind("127.0.0.1", 2241);
+    std::thread trd([]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds (1000));
+        Socket client(SockType::IPPROTO_IPV4);
+        client.connect("127.0.0.1", 2241);
+    });
+    server.listen();
+    Socket cli = server.accept();
+    trd.join();
 }

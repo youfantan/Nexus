@@ -1,8 +1,9 @@
 #pragma once
+
 #include <cstdint>
 #include <concepts>
 #include <shared_mutex>
-#include "check.h"
+#include "../utils/check.h"
 
 namespace Nexus::Base {
     template<typename A>
@@ -25,10 +26,12 @@ namespace Nexus::Base {
 
     template<typename C>
     concept ContainerStreamable = requires(C c) {
-        { c.template next<plain_type_for_constraint>() } -> std::same_as<Nexus::Check::mayfail<plain_type_for_constraint>>;
+        { c.template next<plain_type_for_constraint>() } -> std::same_as<Nexus::Utils::mayfail<plain_type_for_constraint>>;
         { c.template next<plain_type_for_constraint>(plain_type_for_constraint()) } -> std::same_as<bool>;
+        { c.read(UINT64_MAX, UINT64_MAX) } -> std::same_as<Nexus::Utils::mayfail<std::unique_ptr<char>>>;
+        { c.write(nullptr, UINT64_MAX, UINT64_MAX) } -> std::same_as<bool>;
         { c.rewind() };
-        { c.position() } -> std::same_as<uint64_t>;
+        { c.position() } -> std::same_as<uint64_t&>;
         { c.position(UINT64_MAX) };
         { c.flag() } -> std::same_as<typename C::flag_t>;
         { c.close() };
@@ -36,6 +39,13 @@ namespace Nexus::Base {
 
     template<typename T>
     concept IsSimpleType = std::is_fundamental_v<T> || (std::is_class_v<T> && !std::is_member_function_pointer_v<T>) || std::is_array_v<T>;
+
+    class HeapAllocator {
+    public:
+        char* allocate(uint64_t size);
+        char* reallocate(char* old_ptr, uint64_t old_size, uint64_t new_size);
+        bool recycle(char* ptr, uint64_t size);
+    };
 
     template<typename C> requires ContainerStreamable<C>
     class Stream {
@@ -48,10 +58,14 @@ namespace Nexus::Base {
         explicit Stream(C&& container);
         /* Read the next data. */
         template<typename T> requires IsSimpleType<T>
-        Nexus::Check::mayfail<T> next();
+        Nexus::Utils::mayfail<T> next();
         /* Write the next data. */
         template<typename T> requires IsSimpleType<T>
         bool next(T t);
+        /* Read data in specified size. */
+        Nexus::Utils::mayfail<std::unique_ptr<char>> read(uint64_t len);
+        /* Write data in specified size. */
+        bool write(char* ptr, uint64_t len);
         /* Rewind the container. */
         void rewind();
         /* Get the position of container. */
@@ -60,17 +74,12 @@ namespace Nexus::Base {
         void position(uint64_t npos);
         /* Get the last operation flag of container. */
         C::flag_t flag();
+        /* Get the reference of the container. */
+        C& container();
         /* Call this function only when you need to release the container before Stream destruction automatically. When Stream is being
          * destructed, it will close the container.  */
         void close();
         ~Stream();
-    };
-
-    class HeapAllocator {
-    public:
-        char* allocate(uint64_t size);
-        char* reallocate(char* old_ptr, uint64_t old_size, uint64_t new_size);
-        bool recycle(char* ptr, uint64_t size);
     };
 
     /*
@@ -81,11 +90,7 @@ namespace Nexus::Base {
     class UniquePool {
     public:
         static constexpr uint64_t single_automatic_expand_length = 1024;
-        struct settings {
-            char auto_expand:1;
-            char auto_free:1;
-            char reserved:6;
-        };
+        using settings = char;
         enum class flag_t {
             eof
         };
@@ -93,7 +98,8 @@ namespace Nexus::Base {
         char* memptr_;
         uint64_t capacity_;
         A allocator_;
-        settings settings_{1, 1, 0};
+        // Bit Assign: [7:2] Reserved [2:1] Auto Free [1:0] Auto Expand
+        settings settings_{1};
         uint64_t position_{0};
         flag_t flag_;
     public:
@@ -104,7 +110,13 @@ namespace Nexus::Base {
         /* UniquePool cannot be copied. */
         UniquePool(const UniquePool& up) = delete;
         /* UniquePool can be moved. */
-        UniquePool(UniquePool&& up);
+        UniquePool(UniquePool&& up) noexcept;
+        /* Direct access to the buffer. */
+        char& operator[](uint64_t index);
+        /* Read data in specified size with specified position. */
+        Nexus::Utils::mayfail<std::unique_ptr<char>> read(uint64_t off, uint64_t len);
+        /* Write data in specified size with specified position. */
+        bool write(char* ptr, uint64_t off, uint64_t len);
         /* Apply settings for UniquePool */
         void apply_settings(const settings& settings);
         bool expand(uint64_t new_capacity);
@@ -115,11 +127,11 @@ namespace Nexus::Base {
 
 
         template<typename T> requires IsSimpleType<T>
-        Nexus::Check::mayfail<T> next();
+        Nexus::Utils::mayfail<T> next();
         template<typename T> requires IsSimpleType<T>
         bool next(T t);
         void rewind();
-        uint64_t position();
+        uint64_t& position();
         void position(uint64_t npos);
         flag_t flag();
         void close();
@@ -133,10 +145,8 @@ namespace Nexus::Base {
     class SharedPool {
     public:
         static constexpr uint64_t single_automatic_expand_length = 1024;
-        struct settings {
-            char auto_expand:1;
-            char reserved:7;
-        };
+        // Bit Assign: [7:6] Auto Expand [6:0] Reserved
+        using settings = char;
         enum class flag_t {
             eof
         };
@@ -144,7 +154,8 @@ namespace Nexus::Base {
         char** memholder_;
         uint64_t* capacity_{new uint64_t(0)};
         A allocator_;
-        settings settings_{1, 0};
+        // Bit Assign: [7:1] Reserved [1:0] Auto Expand
+        settings settings_{1};
         uint64_t position_{0};
         int64_t* reference_counting{new int64_t (1)};
         std::shared_mutex* mtx;
@@ -158,6 +169,12 @@ namespace Nexus::Base {
         SharedPool(const SharedPool& up);
         /* SharedPool cannot be moved. */
         SharedPool(SharedPool&& up) = delete;
+        /* Direct access to the buffer. */
+        char& operator[](uint64_t index);
+        /* Read data in specified size with specified position. */
+        Nexus::Utils::mayfail<std::unique_ptr<char>> read(uint64_t off, uint64_t len);
+        /* Write data in specified size with specified position. */
+        bool write(char* ptr, uint64_t off, uint64_t len);
         /* Apply settings for UniquePool */
         void apply_settings(const settings& settings);
         /* Adjust the reference counter; Pass positive value to increase the value and negative value to decrease the value. */
@@ -170,16 +187,34 @@ namespace Nexus::Base {
 
 
         template<typename T> requires IsSimpleType<T>
-        Nexus::Check::mayfail<T> next();
+        Nexus::Utils::mayfail<T> next();
         template<typename T> requires IsSimpleType<T>
         bool next(T t);
         void rewind();
-        uint64_t position();
+        uint64_t& position();
         void position(uint64_t npos);
         flag_t flag();
         void close();
     };
 
+    template<typename T, typename A = HeapAllocator> requires IsAllocator<A>
+    class UniqueFlexHolder{
+    private:
+        A allocator_;
+        uint64_t size_;
+        char* buffer_;
+    public:
+        explicit UniqueFlexHolder(const T& t);
+        explicit UniqueFlexHolder(uint64_t capacity);
+        UniqueFlexHolder(UniqueFlexHolder&) = delete;
+        UniqueFlexHolder(UniqueFlexHolder&&) noexcept;
+        bool assign(void* anyptr);
+        bool assign(const T& anyptr);
+        ~UniqueFlexHolder();
+        T* ptr();
+        T& get();
+    };
 }
 
-#include "../src/memory.tpp"
+
+#include "../../src/mem/memory.tpp"

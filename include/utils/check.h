@@ -3,7 +3,7 @@
 
 #include <algorithm>
 
-namespace Nexus::Check {
+namespace Nexus::Utils {
     class failed_t {};
 
     static constexpr failed_t failed = failed_t();
