@@ -27,7 +27,7 @@ namespace Nexus::IO {
     template<typename MUX>
     concept IsIOMUX = requires(MUX mux) {
         MUX();
-        { mux.poll() } -> std::same_as<Nexus::Utils::mayfail<std::vector<io_ev>>>;
+        { mux.poll() } -> std::same_as<Nexus::Utils::MayFail<std::vector<io_ev>>>;
         { mux.add(HANDLE_MAX, UINT32_MAX) } -> std::same_as<bool>;
         { mux.remove(HANDLE_MAX) };
         mux.close(); // IOMUX must take appropriate measures to avoid double-free errors
@@ -39,7 +39,7 @@ namespace Nexus::IO {
         MUX mux_;
     public:
         IOMultiplexer() : mux_(MUX()) {}
-        Nexus::Utils::mayfail<std::vector<io_ev>> poll() {
+        Nexus::Utils::MayFail<std::vector<io_ev>> poll() {
             return mux_.poll();
         }
         bool add(io_handle_t handle, io_evtyp_t evtyp) {

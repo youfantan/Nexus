@@ -1,8 +1,8 @@
 #pragma once
 
 enum class SockType {
-    IPPROTO_IPV4,
-    IPPROTO_IPV6,
-    IPPROTO_UNIX,
+    SOCK_IPV4,
+    SOCK_IPV6,
+    SOCK_UNIX,
     INVALID
 };

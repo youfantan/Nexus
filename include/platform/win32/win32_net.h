@@ -5,7 +5,7 @@
 #include "./include/utils/unexpected.h"
 
 namespace Nexus::Utils {
-    mayfail<in_addr> DNSLookUpV4(const std::string& str) {
+    MayFail<in_addr> DNSLookUpV4(const std::string& str) {
         PDNS_RECORD dnsrec {};
         DNS_STATUS status = DnsQuery(str.c_str(), DNS_TYPE_A, DNS_QUERY_STANDARD, nullptr, &dnsrec, nullptr);
         if (status == DNS_ERROR_RCODE_NO_ERROR) {
@@ -24,7 +24,7 @@ namespace Nexus::Utils {
         BREAKPOINT;
         return failed;
     }
-    mayfail<in6_addr> DNSLookUpV6(const std::string& str) {
+    MayFail<in6_addr> DNSLookUpV6(const std::string& str) {
         PDNS_RECORD dnsrec {};
             DNS_STATUS status = DnsQuery(str.c_str(), DNS_TYPE_AAAA, DNS_QUERY_STANDARD, nullptr, &dnsrec, nullptr);
         if (status == DNS_ERROR_RCODE_NO_ERROR) {

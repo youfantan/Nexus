@@ -13,9 +13,15 @@ namespace Nexus::Base {
         { a.recycle(nullptr, UINT64_MAX) } -> std::same_as<bool>;
     };
 
-    /*
-     * For a container that supports streaming operations, it must provide next() function which returns data with any plain type.
-     * */
+    class HeapAllocator {
+    public:
+        char* allocate(uint64_t size);
+        char* reallocate(char* old_ptr, uint64_t old_size, uint64_t new_size);
+        bool recycle(char* ptr, uint64_t size);
+    };
+
+    template<typename T, typename A = HeapAllocator> requires IsAllocator<A>
+    class UniqueFlexHolder;
 
     struct plain_type_for_constraint {
         uint32_t a;
@@ -23,12 +29,15 @@ namespace Nexus::Base {
         float c;
         bool d;
     };
+    char fixed_array_type_for_constraint[4] = {1, 2, 3, 4};
 
     template<typename C>
     concept ContainerStreamable = requires(C c) {
-        { c.template next<plain_type_for_constraint>() } -> std::same_as<Nexus::Utils::mayfail<plain_type_for_constraint>>;
+        { c.template next<plain_type_for_constraint>() } -> std::same_as<Nexus::Utils::MayFail<plain_type_for_constraint>>;
         { c.template next<plain_type_for_constraint>(plain_type_for_constraint()) } -> std::same_as<bool>;
-        { c.read(UINT64_MAX, UINT64_MAX) } -> std::same_as<Nexus::Utils::mayfail<std::unique_ptr<char>>>;
+        { c.template next<decltype(fixed_array_type_for_constraint)>() } -> std::same_as<Nexus::Utils::MayFail<decltype(fixed_array_type_for_constraint)>>;
+        { c.template next<decltype(fixed_array_type_for_constraint)>(fixed_array_type_for_constraint) } -> std::same_as<bool>;
+        { c.read(UINT64_MAX, UINT64_MAX) } -> std::same_as<Nexus::Utils::MayFail<UniqueFlexHolder<char>>>;
         { c.write(nullptr, UINT64_MAX, UINT64_MAX) } -> std::same_as<bool>;
         { c.rewind() };
         { c.position() } -> std::same_as<uint64_t&>;
@@ -40,11 +49,27 @@ namespace Nexus::Base {
     template<typename T>
     concept IsSimpleType = std::is_fundamental_v<T> || (std::is_class_v<T> && !std::is_member_function_pointer_v<T>) || std::is_array_v<T>;
 
-    class HeapAllocator {
+    /*
+     * UniqueFlexHolder provides a simple instead of unique_ptr, ensured both secure and flexibility.
+     * */
+    template<typename T, typename A> requires IsAllocator<A>
+    class UniqueFlexHolder {
+        friend Nexus::Utils::MayFail<UniqueFlexHolder>;
+    private:
+        A allocator_;
+        uint64_t size_;
+        char* buffer_;
+        UniqueFlexHolder();
     public:
-        char* allocate(uint64_t size);
-        char* reallocate(char* old_ptr, uint64_t old_size, uint64_t new_size);
-        bool recycle(char* ptr, uint64_t size);
+        explicit UniqueFlexHolder(const T& t);
+        explicit UniqueFlexHolder(uint64_t capacity);
+        UniqueFlexHolder(UniqueFlexHolder&) = delete;
+        UniqueFlexHolder(UniqueFlexHolder&&) noexcept;
+        bool assign(void* anyptr);
+        bool assign(const T& t);
+        ~UniqueFlexHolder();
+        T* ptr();
+        T& get();
     };
 
     template<typename C> requires ContainerStreamable<C>
@@ -58,18 +83,24 @@ namespace Nexus::Base {
         explicit Stream(C&& container);
         /* Read the next data. */
         template<typename T> requires IsSimpleType<T>
-        Nexus::Utils::mayfail<T> next();
+        Nexus::Utils::MayFail<T> next();
         /* Write the next data. */
         template<typename T> requires IsSimpleType<T>
         bool next(T t);
+        /* Read the next data which type is fixed array. */
+        template<typename T, size_t S> requires IsSimpleType<T>
+        Nexus::Utils::MayFail<T[S]> next();
+        /* Write the next data which type is fixed array. */
+        template<typename T, size_t S> requires IsSimpleType<T>
+        bool next(T(&t)[S]);
         /* Read data in specified size. */
-        Nexus::Utils::mayfail<std::unique_ptr<char>> read(uint64_t len);
+        Nexus::Utils::MayFail<UniqueFlexHolder<char>> read(uint64_t len);
         /* Write data in specified size. */
         bool write(char* ptr, uint64_t len);
         /* Rewind the container. */
         void rewind();
         /* Get the position of container. */
-        uint64_t position();
+        uint64_t& position();
         /* Set the position of container. */
         void position(uint64_t npos);
         /* Get the last operation flag of container. */
@@ -97,9 +128,9 @@ namespace Nexus::Base {
     private:
         char* memptr_;
         uint64_t capacity_;
-        A allocator_;
+        A allocator_{};
         // Bit Assign: [7:2] Reserved [2:1] Auto Free [1:0] Auto Expand
-        settings settings_{1};
+        settings settings_{0b00000011};
         uint64_t position_{0};
         flag_t flag_;
     public:
@@ -114,12 +145,12 @@ namespace Nexus::Base {
         /* Direct access to the buffer. */
         char& operator[](uint64_t index);
         /* Read data in specified size with specified position. */
-        Nexus::Utils::mayfail<std::unique_ptr<char>> read(uint64_t off, uint64_t len);
+        Nexus::Utils::MayFail<UniqueFlexHolder<char>> read(uint64_t off, uint64_t len);
         /* Write data in specified size with specified position. */
         bool write(char* ptr, uint64_t off, uint64_t len);
         /* Apply settings for UniquePool */
         void apply_settings(const settings& settings);
-        bool expand(uint64_t new_capacity);
+        bool expand(uint64_t expand_size);
         /* Call this function only when you need to release the memory data before UniquePool destruction automatically. When UniquePool is being
          * destructed, it will release the memory pointer if the auto_free flag in settings_ is true.*/
         void release();
@@ -127,9 +158,14 @@ namespace Nexus::Base {
 
 
         template<typename T> requires IsSimpleType<T>
-        Nexus::Utils::mayfail<T> next();
+        Nexus::Utils::MayFail<T> next();
         template<typename T> requires IsSimpleType<T>
         bool next(T t);
+        template<typename T, size_t S> requires IsSimpleType<T>
+        Nexus::Utils::MayFail<T(&)[S]> next();
+        template<typename T, size_t S> requires IsSimpleType<T>
+        bool next(T(&t)[S]);
+
         void rewind();
         uint64_t& position();
         void position(uint64_t npos);
@@ -172,7 +208,7 @@ namespace Nexus::Base {
         /* Direct access to the buffer. */
         char& operator[](uint64_t index);
         /* Read data in specified size with specified position. */
-        Nexus::Utils::mayfail<std::unique_ptr<char>> read(uint64_t off, uint64_t len);
+        Nexus::Utils::MayFail<UniqueFlexHolder<char>> read(uint64_t off, uint64_t len);
         /* Write data in specified size with specified position. */
         bool write(char* ptr, uint64_t off, uint64_t len);
         /* Apply settings for UniquePool */
@@ -187,32 +223,18 @@ namespace Nexus::Base {
 
 
         template<typename T> requires IsSimpleType<T>
-        Nexus::Utils::mayfail<T> next();
+        Nexus::Utils::MayFail<T> next();
         template<typename T> requires IsSimpleType<T>
         bool next(T t);
+        template<typename T, size_t S> requires IsSimpleType<T>
+        Nexus::Utils::MayFail<T[S]> next();
+        template<typename T, size_t S> requires IsSimpleType<T>
+        bool next(T(&t)[S]);
         void rewind();
         uint64_t& position();
         void position(uint64_t npos);
         flag_t flag();
         void close();
-    };
-
-    template<typename T, typename A = HeapAllocator> requires IsAllocator<A>
-    class UniqueFlexHolder{
-    private:
-        A allocator_;
-        uint64_t size_;
-        char* buffer_;
-    public:
-        explicit UniqueFlexHolder(const T& t);
-        explicit UniqueFlexHolder(uint64_t capacity);
-        UniqueFlexHolder(UniqueFlexHolder&) = delete;
-        UniqueFlexHolder(UniqueFlexHolder&&) noexcept;
-        bool assign(void* anyptr);
-        bool assign(const T& anyptr);
-        ~UniqueFlexHolder();
-        T* ptr();
-        T& get();
     };
 }
 

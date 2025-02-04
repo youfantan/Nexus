@@ -9,47 +9,50 @@ namespace Nexus::Utils {
     static constexpr failed_t failed = failed_t();
 
     template<typename R>
-    class mayfail {
+    class MayFail {
     private:
-        R r_;
+        R r_ {};
         bool valid_;
     public:
-        mayfail(R& retv) : r_(retv) {
+        MayFail(R& retv) : r_(retv) {
             valid_ = true;
         }
-        mayfail(R&& retv) : r_(std::move(retv)) {
+        MayFail(R&& retv) : r_(std::move(retv)) {
             valid_ = true;
         }
-        mayfail(failed_t f) {
+        MayFail(failed_t f) {
             valid_ = false;
         }
         bool is_valid () {
             return valid_;
         }
-        R& result() {
+        R& reference() {
             return r_;
+        }
+        R&& result() {
+            return std::move(r_);
         }
     };
 
     template<typename R, size_t N>
-    class mayfail<R[N]> {
+    class MayFail<R[N]> {
     private:
         bool valid_;
         R r_[N];
     public:
-        mayfail(const R (&retv)[N]) {
+        MayFail(const R (&retv)[N]) {
             for (int i = 0; i < N; ++i) {
                 r_[i] = retv[i];
             }
             valid_ = true;
         }
-        mayfail(failed_t f) {
+        MayFail(failed_t f) {
             valid_ = false;
         }
         bool is_valid () {
             return valid_;
         }
-        R& result() {
+        R(&reference())[N] {
             return r_;
         }
     };

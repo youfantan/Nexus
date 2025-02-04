@@ -2,8 +2,8 @@
 #include <cstring>
 #include <new>
 #include <thread>
-#include "include/mem/memory.h"
 
+#define BIT_SELECT(bits, off) (((bits) & (1 << (off))) == (1 << (off)))
 
 using namespace Nexus::Base;
 
@@ -31,12 +31,12 @@ char *HeapAllocator::reallocate(char* old_ptr, uint64_t old_size, uint64_t new_s
 /* Implements for UniquePool */
 
 template<typename A> requires IsAllocator<A>
-UniquePool<A>::UniquePool(uint64_t capacity) : allocator_(A()), memptr_(allocator_.allocate(capacity)), capacity_(capacity) {
-
+UniquePool<A>::UniquePool(uint64_t capacity) : capacity_(capacity) {
+    memptr_ = allocator_.allocate(capacity);
 }
 
 template<typename A>requires IsAllocator<A>
-UniquePool<A>::UniquePool(char *memptr, uint64_t size) :  allocator_(A()), memptr_(memptr), capacity_(size) {
+UniquePool<A>::UniquePool(char *memptr, uint64_t size) : memptr_(memptr), capacity_(size) {
 
 }
 
@@ -53,7 +53,7 @@ char &UniquePool<A>::operator[](uint64_t index) {
 
 template<typename A> requires IsAllocator<A>
 template<typename T> requires IsSimpleType<T>
-Nexus::Utils::mayfail<T> UniquePool<A>::next() {
+Nexus::Utils::MayFail<T> UniquePool<A>::next() {
     constexpr auto step = sizeof(T);
     if (position_ + step > capacity_) {
         flag_ = flag_t::eof;
@@ -70,7 +70,7 @@ template<typename T> requires IsSimpleType<T>
 bool UniquePool<A>::next(T t) {
     constexpr auto step = sizeof(T);
     if (position_ + step > capacity_) {
-        if (settings_ & 0x01) {
+        if (BIT_SELECT(settings_, 0)) {
             expand(step > single_automatic_expand_length ? step : single_automatic_expand_length);
         } else {
             flag_ = flag_t::eof;
@@ -83,9 +83,39 @@ bool UniquePool<A>::next(T t) {
 }
 
 template<typename A> requires IsAllocator<A>
+template<typename T, size_t S> requires IsSimpleType<T>
+bool UniquePool<A>::next(T (&t)[S]) {
+    constexpr auto size = sizeof(T) * S;
+    if (position_ + size > capacity_) {
+        if (BIT_SELECT(settings_, 0)) {
+            expand(size > single_automatic_expand_length ? size : single_automatic_expand_length);
+        } else {
+            flag_ = flag_t::eof;
+            return false;
+        }
+    }
+    memcpy(memptr_ + position_, &t[0], size);
+    position_ += size;
+}
+/* Read the next data which type is fixed array. */
+template<typename A> requires IsAllocator<A>
+template<typename T, size_t S> requires IsSimpleType<T>
+Nexus::Utils::MayFail<T(&)[S]> UniquePool<A>::next() {
+    constexpr auto size = sizeof(T) * S;
+    if (position_ + size > capacity_) {
+        flag_ = flag_t::eof;
+        return Nexus::Utils::failed;
+    }
+    T d{};
+    memcpy(&d[0], memptr_ + position_, size);
+    position_ += size;
+    return d;
+}
+
+template<typename A> requires IsAllocator<A>
 bool UniquePool<A>::write(char *ptr, uint64_t off, uint64_t len) {
     if (off + len > capacity_) {
-        if (settings_ & 0x01) {
+        if (BIT_SELECT(settings_, 0)) {
             expand((off + len - capacity_) > single_automatic_expand_length ? (off + len - capacity_) : single_automatic_expand_length);
         } else {
             flag_ = flag_t::eof;
@@ -97,14 +127,13 @@ bool UniquePool<A>::write(char *ptr, uint64_t off, uint64_t len) {
 }
 
 template<typename A> requires IsAllocator<A>
-Nexus::Utils::mayfail<std::unique_ptr<char>>
-UniquePool<A>::read(uint64_t off, uint64_t len) {
+Nexus::Utils::MayFail<UniqueFlexHolder<char>> UniquePool<A>::read(uint64_t off, uint64_t len) {
     if ((off + len) > capacity_) {
         flag_ = flag_t::eof;
         return Nexus::Utils::failed;
     }
-    auto data = std::make_unique<char>(len);
-    memcpy(data.get(), memptr_ + off, len);
+    auto data = UniqueFlexHolder<char>(len);
+    memcpy(&data.get(), memptr_ + off, len);
     return data;
 }
 
@@ -114,10 +143,11 @@ void UniquePool<A>::apply_settings(const UniquePool::settings &settings) {
 }
 
 template<typename A> requires IsAllocator<A>
-bool UniquePool<A>::expand(uint64_t new_capacity) {
-    if (settings_ & 0x01) {
-        memptr_ = allocator_.reallocate(memptr_, capacity_, new_capacity);
-        capacity_ = new_capacity;
+bool UniquePool<A>::expand(uint64_t expand_size) {
+    expand_size += capacity_;
+    if (BIT_SELECT(settings_, 0)) {
+        memptr_ = allocator_.reallocate(memptr_, capacity_, expand_size);
+        capacity_ = expand_size;
         return true;
     }
     return false;
@@ -130,7 +160,7 @@ UniquePool<A>::~UniquePool() {
 
 template<typename A> requires IsAllocator<A>
 void UniquePool<A>::release() {
-    if (settings_ & 0x02 && memptr_ != nullptr) {
+    if (BIT_SELECT(settings_, 1) && memptr_ != nullptr) {
         allocator_.recycle(memptr_, capacity_);
         memptr_ = nullptr;
     }
@@ -192,7 +222,7 @@ char &SharedPool<A>::operator[](uint64_t index) {
 
 template<typename A> requires IsAllocator<A>
 template<typename T> requires IsSimpleType<T>
-Nexus::Utils::mayfail<T> SharedPool<A>::next() {
+Nexus::Utils::MayFail<T> SharedPool<A>::next() {
     constexpr auto step = sizeof(T);
     mtx->lock_shared();
     if (position_ + step > *capacity_) {
@@ -213,7 +243,7 @@ bool SharedPool<A>::next(T t) {
     constexpr auto step = sizeof(T);
     mtx->lock();
     if (position_ + step > *capacity_) {
-        if (settings_ & 0x01) {
+        if (BIT_SELECT(settings_, 0)) {
             expand(step > single_automatic_expand_length ? position_ + step : position_ + single_automatic_expand_length);
         } else {
             flag_ = flag_t::eof;
@@ -228,10 +258,47 @@ bool SharedPool<A>::next(T t) {
 }
 
 template<typename A> requires IsAllocator<A>
+template<typename T, size_t S> requires IsSimpleType<T>
+bool SharedPool<A>::next(T (&t)[S]) {
+    constexpr auto size = sizeof(T) * S;
+    mtx->lock();
+    if (position_ + size > *capacity_) {
+        if (BIT_SELECT(settings_, 0)) {
+            expand(size > single_automatic_expand_length ? position_ + size : position_ + single_automatic_expand_length);
+        } else {
+            flag_ = flag_t::eof;
+            mtx->unlock();
+            return false;
+        }
+    }
+    memcpy(*memholder_ + position_, &t[0], size);
+    position_ += size;
+    mtx->unlock();
+    return true;
+}
+
+template<typename A> requires IsAllocator<A>
+template<typename T, size_t S> requires IsSimpleType<T>
+Nexus::Utils::MayFail<T[S]> SharedPool<A>::next() {
+    constexpr auto size = sizeof(T) * S;
+    mtx->lock_shared();
+    if (position_ + size > *capacity_) {
+        flag_ = flag_t::eof;
+        mtx->unlock_shared();
+        return Nexus::Utils::failed;
+    }
+    T d{};
+    memcpy(&d[0], *memholder_ + position_, size);
+    position_ += size;
+    mtx->unlock_shared();
+    return d;
+}
+
+template<typename A> requires IsAllocator<A>
 bool SharedPool<A>::write(char *ptr, uint64_t off, uint64_t len) {
     mtx->lock();
     if (off + len > *capacity_) {
-        if (settings_ & 0x01) {
+        if (BIT_SELECT(settings_, 0)) {
             expand((off + len - *capacity_) > single_automatic_expand_length ? (off + len - *capacity_) : single_automatic_expand_length);
         } else {
             flag_ = flag_t::eof;
@@ -242,15 +309,15 @@ bool SharedPool<A>::write(char *ptr, uint64_t off, uint64_t len) {
     return true;
 }
 
-template<typename A> requires IsAllocator<A>Nexus::Utils::mayfail<std::unique_ptr<char>>
+template<typename A> requires IsAllocator<A>Nexus::Utils::MayFail<UniqueFlexHolder<char>>
 SharedPool<A>::read(uint64_t off, uint64_t len) {
     mtx->lock_shared();
     if ((off + len) > *capacity_) {
         flag_ = flag_t::eof;
         return Nexus::Utils::failed;
     }
-    auto data = std::make_unique<char>(len);
-    memcpy(data.get(), *memholder_ + off, len);
+    auto data = UniqueFlexHolder<char>(len);
+    memcpy(&data.get(), *memholder_ + off, len);
     mtx->unlock_shared();
     return data;
 }
@@ -262,7 +329,7 @@ void SharedPool<A>::apply_settings(const SharedPool::settings &settings) {
 
 template<typename A> requires IsAllocator<A>
 bool SharedPool<A>::expand(uint64_t new_capacity) {
-    if (settings_ & 0x01) {
+    if (BIT_SELECT(settings_, 0)) {
         *memholder_ = allocator_.reallocate(*memholder_, *capacity_, new_capacity);
         *capacity_ = new_capacity;
         return true;
@@ -346,7 +413,7 @@ Stream<C>::Stream(C &&container) : container_(std::move(container)) {
 
 template<typename C> requires ContainerStreamable<C>
 template<typename T> requires IsSimpleType<T>
-Nexus::Utils::mayfail<T> Stream<C>::next() {
+Nexus::Utils::MayFail<T> Stream<C>::next() {
     return container_.template next<T>();
 }
 
@@ -354,6 +421,17 @@ template<typename C> requires ContainerStreamable<C>
 template<typename T> requires IsSimpleType<T>
 bool Stream<C>::next(T t) {
     return container_.next(t);
+}
+
+template<typename C> requires ContainerStreamable<C>
+template<typename T, size_t S> requires IsSimpleType<T>
+bool Stream<C>::next(T (&t)[S]) {
+    return container_.next(t);
+}
+template<typename C> requires ContainerStreamable<C>
+template<typename T, size_t S> requires IsSimpleType<T>
+Nexus::Utils::MayFail<T[S]> Stream<C>::next() {
+    return container_.template next<T[S]>();
 }
 
 template<typename C> requires ContainerStreamable<C>
@@ -372,7 +450,7 @@ void Stream<C>::position(uint64_t npos) {
 }
 
 template<typename C> requires ContainerStreamable<C>
-uint64_t Stream<C>::position() {
+uint64_t& Stream<C>::position() {
     return container_.position();
 }
 
@@ -394,15 +472,21 @@ requires ContainerStreamable<C>C &Stream<C>::container() {
 template<typename C>
 requires ContainerStreamable<C>
 bool Stream<C>::write(char *ptr, uint64_t len) {
-    return container_.write(ptr, position(), len);
+    if (!container_.write(ptr, position(), len)) return false;
+    position() += len;
+    return true;
 }
 
 template<typename C>
 requires ContainerStreamable<C>
-Nexus::Utils::mayfail<std::unique_ptr<char>> Stream<C>::read(uint64_t len) {
-    return container_.read(position(), len);
+Nexus::Utils::MayFail<UniqueFlexHolder<char>> Stream<C>::read(uint64_t len) {
+    Nexus::Utils::MayFail<UniqueFlexHolder<char>> r = container_.read(position(), len);
+    if (r.is_valid()) position() += len;
+    return r;
 }
 
+template<typename T, typename A> requires IsAllocator<A>
+UniqueFlexHolder<T, A>::UniqueFlexHolder() : size_(0), buffer_(nullptr) {}
 
 template<typename T, typename A> requires IsAllocator<A>
 UniqueFlexHolder<T, A>::UniqueFlexHolder(const T &t) : size_(sizeof(T)) {

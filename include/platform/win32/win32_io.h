@@ -26,7 +26,7 @@ namespace Nexus::IO {
                 }
             }
         }
-        Nexus::Utils::mayfail<std::vector<io_ev>> poll(int waitms) {
+        Nexus::Utils::MayFail<std::vector<io_ev>> poll(int waitms) {
             fd_set rset{};
             fd_set wset{};
             fd_set eset{};

@@ -42,10 +42,12 @@ namespace Nexus::Net {
         const Socket& sock_;
         Stream<UniquePool<>> istream_;
         Stream<UniquePool<>> ostream_;
-        uint64_t rpos_;
-        uint64_t wpos_;
+        uint64_t rpos_{};
+        uint64_t wpos_{};
     public:
         explicit SocketBuffer(const Socket& socket);
+        SocketBuffer(SocketBuffer&) = delete;
+        SocketBuffer(SocketBuffer&& buffer);
         bool update();
         Stream<UniquePool<>>& istream();
         Stream<UniquePool<>>& ostream();
