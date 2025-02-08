@@ -2,6 +2,7 @@
 #include <include/mem/memory.h>
 
 namespace Nexus::Test::Base {
+    using namespace Nexus::Base;
     struct data {
         int d0;
         float d1;
@@ -39,6 +40,42 @@ namespace Nexus::Test::Base {
         mayfail_assert(d4);
         test_assert(d4.reference() == 114514);
         stream.~Stream();
+        return true;
+    }
+
+
+    SharedPool<> getsp() {
+        SharedPool<> sp(48);
+        Stream<SharedPool<>> stream(sp);
+        char p[4] = {1, 2, 3, 4};
+        for (int i = 0; i < 1024; ++i) {
+            stream.next(p);
+        }
+        return sp;
+    }
+
+    inline static bool SharedPoolTest() {
+        using namespace Nexus::Utils;
+        using namespace Nexus::Base;
+        auto tp = getsp();
+        std::thread trd[8];
+        for (int i = 0; i < 8; ++i) {
+            trd[i] = std::thread([&]() {
+                [i, tp]() {
+                    auto stream = Stream(tp);
+                    stream.position(i * 128);
+                    char p[4] {1, 2, 3, 4};
+                    auto r = stream.next<decltype(p)>();
+                    mayfail_assert(r);
+                    test_assert(PtrCompare(r.reference(), p, 4));
+                    return true;
+                }();
+            });
+        }
+        for (auto& t : trd) {
+            t.join();
+        }
+        tp.close();
         return true;
     }
 

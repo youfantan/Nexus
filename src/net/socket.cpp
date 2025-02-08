@@ -1,6 +1,4 @@
-//#include "include/io/socket.h"
-#include "include/utils/netaddr.h"
-
+#include "include/net/socket.h"
 
 using namespace Nexus::Net;
 using namespace Nexus::Utils;
@@ -143,45 +141,13 @@ bool Socket::setnonblocking() {
     return SetNonblockingSocket(fd_);
 }
 
-SocketBuffer::SocketBuffer(const Socket& socket) : sock_(socket), istream_(UniquePool<>(default_socket_buffer_size)), ostream_(UniquePool<>(default_socket_buffer_size)) {}
-
-bool SocketBuffer::update() {
-    // flush output buffer
-    if (ostream_.position() > wpos_) {
-        uint64_t remains = ostream_.position() - wpos_;
-        uint64_t written = 0;
-        char* dataptr = &ostream_.container()[wpos_];
-        while (remains != 0) {
-            uint64_t wr = send(sock_.fd_, dataptr, 1024, 0);
-            if (wr == SOCKET_ERROR) {
-                wpos_ += written;
-                return false;
-            }
-            written += wr;
-            remains -= wr;
-        }
-        return true;
-    }
-    // read input data
-    {
-        char buffer[1024] {};
-        uint64_t read;
-        rpos_ = istream_.position();
-        while ((read = recv(sock_.fd_, buffer, 1024, 0)) != SOCKET_ERROR) {
-            istream_.write(buffer, read);
-        }
-        istream_.position(rpos_);
-        if (errno == EWOULDBLOCK || errno == EAGAIN) {
-            return true;
-        }
-        return false;
+bool Socket::bind(Nexus::Utils::NetAddr addr) {
+    if (addr.type() == SockType::SOCK_IPV4) {
+        return bind(addr.addrv4().get(), addr.port());
+    } else {
+        return bind(addr.addrv6().get(), addr.port());
     }
 }
-
-Stream<UniquePool<>>& SocketBuffer::istream() {
-    return istream_;
-}
-
-Stream<UniquePool<>>& SocketBuffer::ostream() {
-    return ostream_;
+io_handle_t Socket::fd() {
+    return fd_;
 }

@@ -50,8 +50,8 @@ namespace Nexus::Utils {
 
         SockType type() { return type_; }
 
-        UniqueFlexHolder<sockaddr> addr() {
-            UniqueFlexHolder<sockaddr> holder(sizeof(sockaddr_in6));
+        Base::UniqueFlexHolder<sockaddr> addr() {
+            Base::UniqueFlexHolder<sockaddr> holder(sizeof(sockaddr_in6));
             if (type_ == SockType::SOCK_IPV4) {
                 sockaddr_in sa{};
                 memset(&sa, 0, sizeof(sockaddr_in));
@@ -70,8 +70,8 @@ namespace Nexus::Utils {
             return holder;
         }
 
-        UniqueFlexHolder<sockaddr_in> addrv4() {
-            UniqueFlexHolder<sockaddr_in> holder(sizeof(sockaddr_in));
+        Base::UniqueFlexHolder<sockaddr_in> addrv4() {
+            Base::UniqueFlexHolder<sockaddr_in> holder(sizeof(sockaddr_in));
             sockaddr_in sa4{};
             memset(&sa4, 0, sizeof(sockaddr_in));
             sa4.sin_family = AF_INET;
@@ -81,8 +81,8 @@ namespace Nexus::Utils {
             return holder;
         }
 
-        UniqueFlexHolder<sockaddr_in6> addrv6() {
-            UniqueFlexHolder<sockaddr_in6> holder(sizeof(sockaddr_in6));
+        Base::UniqueFlexHolder<sockaddr_in6> addrv6() {
+            Base::UniqueFlexHolder<sockaddr_in6> holder(sizeof(sockaddr_in6));
             sockaddr_in6 sa6{};
             memset(&sa6, 0, sizeof(sockaddr_in6));
             sa6.sin6_family = AF_INET6;
@@ -95,7 +95,11 @@ namespace Nexus::Utils {
         int size() {
             if (type_ == SockType::SOCK_IPV4) return sizeof(sockaddr_in);
             else if (type_ == SockType::SOCK_IPV6) return sizeof(sockaddr_in6);
-            else return 0;
+                else return 0;
+        }
+
+        uint16_t port() {
+            return port_;
         }
     };
 }

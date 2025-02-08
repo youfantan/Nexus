@@ -20,11 +20,7 @@ namespace Nexus::IO {
             return true;
         }
         void remove(SOCKET fd) {
-            for (auto iter = fds_.begin(); iter != fds_.end(); iter++) {
-                if (iter->handle == fd) {
-                    fds_.erase(iter);
-                }
-            }
+            fds_.erase(std::remove_if(fds_.begin(), fds_.end(), [fd](const io_ev& f) { return f.handle == fd; }), fds_.end());
         }
         Nexus::Utils::MayFail<std::vector<io_ev>> poll(int waitms) {
             fd_set rset{};
@@ -58,7 +54,9 @@ namespace Nexus::IO {
                 return Nexus::Utils::failed;
             }
         }
-        void close() {}
+        void close() {
+
+        }
 
     };
 }
