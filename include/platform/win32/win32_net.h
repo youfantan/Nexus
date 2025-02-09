@@ -42,7 +42,3 @@ namespace Nexus::Utils {
         return failed;
     }
 }
-namespace Nexus::Net {
-    void CloseSocket(io_handle_t handle);
-    bool SetNonblockingSocket(io_handle_t handle);
-}

@@ -5,7 +5,7 @@
 #include "include/platform/win32/win32_defs.h"
 #include "include/platform/win32/win32_net.h"
 #endif
-#include "include/base/netdefs.h"
+#include "include/base/def.h"
 #include "include/mem/memory.h"
 #include "include/utils/netaddr.h"
 
@@ -15,8 +15,9 @@ namespace Nexus::Net {
         io_handle_t fd_;
         bool invalid_ {false};
         SockType type_;
+        Nexus::Utils::NetAddr addr_;
     public:
-        Socket(io_handle_t fd, SockType typ);
+        Socket(io_handle_t fd, SockType typ, Nexus::Utils::NetAddr addr);
         explicit Socket(SockType typ);
         bool bind(const std::string& addr, uint16_t port);
         bool bind(sockaddr_in6 addrv6, uint16_t port);
@@ -31,8 +32,11 @@ namespace Nexus::Net {
         bool setnonblocking();
         bool invalid();
         io_handle_t fd();
+        Nexus::Utils::NetAddr& addr();
     };
 
     extern void CloseSocket(io_handle_t handle);
     extern bool SetNonblockingSocket(io_handle_t handle);
+    extern int GetLastNetworkError();
+    extern int GetLastSystemError();
 }

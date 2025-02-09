@@ -6,14 +6,10 @@
 
 #include <filesystem>
 
-inline static bool HttpServerTest() {
-    return true;
-}
 int main() {
     using namespace Nexus::Test::Base;
     RegisterTask(SharedPoolTest);
     RegisterTask(UniquePoolTest);
     RegisterTask(UniqueFlexHolderTest);
-    RegisterTask(HttpServerTest);
     ExecuteAll();
 }

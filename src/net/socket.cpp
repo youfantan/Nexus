@@ -1,3 +1,5 @@
+#include <utility>
+
 #include "include/net/socket.h"
 
 using namespace Nexus::Net;
@@ -12,7 +14,7 @@ Socket::Socket(SockType typ) : type_(typ) {
     }
 }
 
-Socket::Socket(io_handle_t fd, SockType typ) : fd_(fd), type_(typ), invalid_(false) {}
+Socket::Socket(io_handle_t fd, SockType typ, NetAddr addr) : fd_(fd), type_(typ), invalid_(false), addr_(std::move(addr)) {}
 
 bool Socket::bind(const std::string &addr, uint16_t port) {
     if (invalid_) return false;
@@ -121,9 +123,15 @@ Socket Socket::accept() {
     int len = sizeof(sockaddr_storage);
     io_handle_t sock = ::accept(fd_, reinterpret_cast<sockaddr*>(&ss), &len);
     if (sock != INVALID_SOCKET) {
-        if (ss.ss_family == AF_INET) return {sock, SockType::SOCK_IPV4};
-        else if (ss.ss_family == AF_INET6) return {sock, SockType::SOCK_IPV6};
-        else if (ss.ss_family == AF_UNIX) return {sock, SockType::SOCK_UNIX};
+        if (ss.ss_family == AF_INET) {
+            addr_ = NetAddr(reinterpret_cast<sockaddr*>(&ss));
+            return {sock, SockType::SOCK_IPV4, addr_};
+        }
+        else if (ss.ss_family == AF_INET6) {
+            addr_ = NetAddr(reinterpret_cast<sockaddr*>(&ss));
+            return {sock, SockType::SOCK_IPV6, addr_};
+        }
+        else if (ss.ss_family == AF_UNIX) return {sock, SockType::SOCK_UNIX, {}};
         else CloseSocket(sock);
     }
     return Socket {SockType::INVALID};
@@ -150,4 +158,7 @@ bool Socket::bind(Nexus::Utils::NetAddr addr) {
 }
 io_handle_t Socket::fd() {
     return fd_;
+}
+Nexus::Utils::NetAddr& Socket::addr() {
+    return addr_;
 }

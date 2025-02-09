@@ -6,17 +6,23 @@
 #include "../utils/netaddr.h"
 #include "../io/resource_locator.h"
 #include "http_handler.h"
-#include "../log/logger.h"
+#include "include/log/logger.h"
+
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
 
 #ifdef PLATFORM_WIN32
 #include <include/platform/win32/win32_io.h>
 #endif
 
 namespace Nexus::Net {
-    extern uint64_t executed_sock;
-    class HttpConnection {
+    extern uint64_t executed_tls;
+    class HttpsConnection {
     public:
         using status_t = enum {
+            HANDSHAKE,
             READ,
             EXECUTING,
             RESPONSE,
@@ -30,36 +36,58 @@ namespace Nexus::Net {
         Nexus::Base::Stream<decltype(request_)> req_stream_;
         Nexus::Base::SharedPool<> response_;
         Nexus::Base::Stream<decltype(response_)> resp_stream_;
-        status_t status_ {READ};
+        status_t status_ {HANDSHAKE};
         HttpResolver resolver_;
         uint64_t content_length_ {0};
+        SSL* ssl_;
         std::mutex mtx_;
     public:
-        HttpConnection(Socket sock, std::unordered_map<std::string, HttpHandlerFunctionSet>& handlers) : sock_(sock), request_(1024), req_stream_(request_), resolver_(request_),
-                                                                                                         response_(1024), resp_stream_(response_), handlers_(handlers), mtx_(std::mutex{}) {
+        HttpsConnection(Socket sock, std::unordered_map<std::string, HttpHandlerFunctionSet>& handlers, SSL* ssl) : sock_(sock), request_(1024), req_stream_(request_), resolver_(request_),
+                                                                                                                    response_(1024), resp_stream_(response_), handlers_(handlers), ssl_(ssl), mtx_(std::mutex{}) {
             auto now = std::chrono::system_clock::now().time_since_epoch();
             established_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
         }
-        HttpConnection(HttpConnection&& conn) : sock_(conn.sock_), request_(std::move(conn.request_)), req_stream_(conn.req_stream_),
+
+        HttpsConnection(HttpsConnection&& conn) : sock_(conn.sock_), request_(std::move(conn.request_)), req_stream_(conn.req_stream_),
         resolver_(std::move(conn.resolver_)), response_(std::move(conn.response_)), resp_stream_(conn.resp_stream_),
-        handlers_(conn.handlers_),  mtx_(std::mutex{}), content_length_(conn.content_length_), established_time_(conn.established_time_), status_(conn.status_){}
+        handlers_(conn.handlers_), ssl_(conn.ssl_), mtx_(std::mutex{}), content_length_(conn.content_length_), established_time_(conn.established_time_), status_(conn.status_){}
+
         void drive() {
             mtx_.lock();
             switch (status_) {
-                case READ: {
-                    int r;
-                    char buf[1024];
-                    while ((r = recv(sock_.fd(), buf, 1024, 0)) > 0) {
-                        req_stream_.write(buf, r);
-                    }
-                    if (r == 0 || (GetLastNetworkError() != WSAEWOULDBLOCK)) {
-                        LWARN("Socket read error, closing Socket connection: {}. Errno: {} | {}", sock_.addr().url(), GetLastNetworkError(), GetLastSystemError());
+                case HANDSHAKE: {
+                    int ret;
+                    do {
+                        ret = SSL_accept(ssl_);
+                    } while (ret == -1 && ((SSL_get_error(ssl_, ret) == SSL_ERROR_WANT_READ) || (SSL_get_error(ssl_, ret) == SSL_ERROR_WANT_WRITE)));
+                    if (ret <= 0) {
+                        int err = SSL_get_error(ssl_, ret);
+                        ERR_print_errors_fp(stderr);
+                        LWARN("SSL handshake error, closing TLS connection: {}. SSL ErrorCode: {}, Errno: {} | {}", sock_.addr().url(), err, GetLastNetworkError(), GetLastSystemError());
                         cleanup();
                         break;
                     }
+                    BIO_set_nbio(SSL_get_wbio(ssl_), 1);
+                    status_ = READ;
+                    break;
+                }
+                case READ: {
+                    int r;
+                    char buf[1024];
+                    while ((r = SSL_read(ssl_, buf, 1024)) > 0) {
+                        req_stream_.write(buf, r);
+                    }
+                    if (r <= 0) {
+                        int err = SSL_get_error(ssl_, r);
+                        if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
+                            LWARN("SSL read error, closing TLS connection: {}. SSL ErrorCode: {}, Errno: {} | {}", sock_.addr().url(), err, GetLastNetworkError(), GetLastSystemError());
+                            cleanup();
+                            break;
+                        }
+                    }
                     if (resolver_.header_ended()) {
                         auto method = resolver_.resolve_method();
-                        resolver_.resolve_headers() ;
+                        resolver_.resolve_headers();
                         if (method == http_method::GET) {
                             status_ = EXECUTING;
                             break;
@@ -86,10 +114,10 @@ namespace Nexus::Net {
                     break;
                 }
                 case EXECUTING: {
-                    executed_sock++;
+                    executed_tls++;
                     if (resolver_.resolve_method() == http_method::GET) {
-                        auto path = resolver_.resolve_path();\
-                        LINFO("New Http Request: GET {} from {}", path, sock_.addr().url());
+                        auto path = resolver_.resolve_path();
+                        LINFO("New Https Request: GET {} from {}", path, sock_.addr().url());
                         if (handlers_.contains(path)) {
                             HttpHandlerFunctionSet& fs = handlers_.at(path);
                             get_request gr { resolver_.resolve_headers() };
@@ -121,7 +149,7 @@ namespace Nexus::Net {
                         Nexus::Base::SharedPool<> body(1024);
                         body.write(&request_[resolver_.resolve_header_end() + 1], content_length_);
                         auto path = resolver_.resolve_path();
-                        LINFO("New Http Request: POST /{} from {}", path, sock_.addr().url());
+                        LINFO("New Https Request: POST {} from {}", path, sock_.addr().url());
                         if (handlers_.contains(path)) {
                             HttpHandlerFunctionSet &fs = handlers_.at(path);
                             post_request pr{resolver_.resolve_headers(), body};
@@ -146,14 +174,15 @@ namespace Nexus::Net {
                     int r;
                     do {
                         auto buf = resp_stream_.read(1024);
-                        r = send(sock_.fd(), buf.reference().ptr(), static_cast<int>(buf.reference().size()), 0);
+                        r = SSL_write(ssl_, buf.reference().ptr(), static_cast<int>(buf.reference().size()));
                     } while (resp_stream_.flag() != Nexus::Base::SharedPool<>::flag_t::eof && r > 0);
                     if (r < 0) {
-                        if (WSAGetLastError() != WSAEWOULDBLOCK) {
-                            LWARN("Socket write error, closing Socket connection: {}. Errno: {} | {}", sock_.addr().url(), GetLastNetworkError(), GetLastSystemError());
+                        int err = SSL_get_error(ssl_, r);
+                        if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
+                            LWARN("SSL write error, closing TLS connection: {}. SSL ErrorCode: {}, Errno: {} | {}", sock_.addr().url(), err, GetLastNetworkError(), GetLastSystemError());
                             cleanup();
                         }
-                    } else if (r == 0) {
+                    } else {
                         cleanup();
                     }
                     break;
@@ -200,6 +229,8 @@ namespace Nexus::Net {
         void cleanup() {
             if (status_ != FINISHED) {
                 status_ = FINISHED;
+                SSL_shutdown(ssl_);
+                SSL_free(ssl_);
                 sock_.close();
             }
         }
@@ -214,6 +245,6 @@ namespace Nexus::Net {
     };
 
 
-    
+
 
 }

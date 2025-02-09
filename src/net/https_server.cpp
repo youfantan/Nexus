@@ -1,5 +1,6 @@
-#include <include/net/http_server.h>
+#include <include/net/https_server.h>
 #include <include/net/http_resolver.h>
+#include <include/log/logger.h>
 #ifdef PLATFORM_WIN32
 #include <include/platform/win32/win32_io.h>
 #endif
@@ -10,22 +11,44 @@ using namespace Nexus::IO;
 using namespace Nexus::Base;
 using namespace Nexus::Parallel;
 
-uint64_t Nexus::Net::executed_sock = 0;
+uint64_t Nexus::Net::executed_tls = 0;
 
 template<typename MUX, int N>
-Nexus::Net::HttpServer<MUX, N>::HttpServer::HttpServer(Nexus::Utils::NetAddr addr , WorkGroup<N>& group) : sock_(addr.type()), iomux_(IOMultiplexer<MUX>()), group_(group) {
+Nexus::Net::HttpsServer<MUX, N>::HttpsServer(Nexus::Utils::NetAddr addr, WorkGroup<N>& group) : sock_(addr.type()), iomux_(IOMultiplexer<MUX>()), group_(group) {
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+    if (!ctx)
+    {
+        ERR_print_errors_fp(stderr);
+        LFATAL("Error occurred when creating SSL context");
+        exit(EXIT_FAILURE);
+    }
+    if (SSL_CTX_use_certificate_file(ctx, "server.crt", SSL_FILETYPE_PEM) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        LFATAL("Error occurred when reading SSL Certificate");
+        exit(EXIT_FAILURE);
+    }
+
+    if (SSL_CTX_use_PrivateKey_file(ctx, "server.key", SSL_FILETYPE_PEM) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        LFATAL("Error occurred when creating SSL Private Key");
+        exit(EXIT_FAILURE);
+    }
+    ssl_ctx_ = ctx;
     if (!sock_.bind(addr)) {
         LFATAL("Error occured when bind http server to {}. Error Code: {}", addr.url(), GetLastNetworkError());
         exit(EXIT_FAILURE);
     }
     sock_.listen();
-    LINFO("Http Server started on {}", addr.url());
     sock_.setnonblocking();
     iomux_.add(sock_.fd(), IO_EVREAD);
+    LINFO("Https Server started on {}", addr.url());
 }
-
 template<typename MUX, int N>
-void Nexus::Net::HttpServer<MUX, N>::HttpServer::loop() {
+void Nexus::Net::HttpsServer<MUX, N>::HttpsServer::loop() {
     auto evs = iomux_.poll(0);
     if (evs.is_valid()) {
         for (auto& ev : evs.reference()) {
@@ -36,12 +59,14 @@ void Nexus::Net::HttpServer<MUX, N>::HttpServer::loop() {
                     client.close();
                     continue;
                 }
+                SSL* ssl = SSL_new(ssl_ctx_);
+                SSL_set_fd(ssl, client.fd());
                 client.setnonblocking();
                 iomux_.add(client.fd(), IO_EVREAD | IO_EVWRITE);
-                connections_.insert(std::make_pair(client.fd(), std::move(HttpConnection(client, handlers_))));
-                LINFO("New Socket Connection created: {}", client.addr().url());
+                connections_.insert(std::make_pair(client.fd(), std::move(HttpsConnection(client, handlers_, ssl))));
+                LINFO("New TLS Connection created: {}", client.addr().url());
             } else {
-                HttpConnection& conn = connections_.at(ev.handle);
+                HttpsConnection& conn = connections_.at(ev.handle);
                 group_.post([&](){
                     conn.drive();
                 });
@@ -51,19 +76,19 @@ void Nexus::Net::HttpServer<MUX, N>::HttpServer::loop() {
     // drive connections
     auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     for (auto it = connections_.begin(); it != connections_.end(); ) {
-        HttpConnection& conn = it->second;
+        HttpsConnection& conn = it->second;
         auto time_elapsed = now - conn.time_established();
-        if (conn.status() == HttpConnection::FINISHED) {
+        if (conn.status() == HttpsConnection::FINISHED) {
             conn.cleanup();
             iomux_.remove(it->first);
             it = connections_.erase(it);
         } else if(time_elapsed > 10000) {
-            LINFO("Socket Connection {} time out. Remain connections: {}", conn.get_socket().addr().url(), connections_.size());
+            LINFO("TLS Connection {} time out. Remain connections: {}", conn.get_socket().addr().url(), connections_.size());
             conn.cleanup();
             iomux_.remove(it->first);
             it = connections_.erase(it);
         } else {
-            if (conn.status() == HttpConnection::EXECUTING) {
+            if (conn.status() == HttpsConnection::EXECUTING) {
                 group_.post([&](){
                     conn.drive();
                 });
@@ -71,17 +96,18 @@ void Nexus::Net::HttpServer<MUX, N>::HttpServer::loop() {
             ++it;
         }
     }
-
 }
+
 template<typename MUX, int N>
-void Nexus::Net::HttpServer<MUX, N>::HttpServer::close() {
+void Nexus::Net::HttpsServer<MUX, N>::HttpsServer::close() {
     for (auto it = connections_.begin(); it != connections_.end(); ) {
-        HttpConnection& conn = it->second;
+        HttpsConnection& conn = it->second;
         conn.cleanup();
         it = connections_.erase(it);
     }
+    EVP_cleanup();
 }
 
 #ifdef PLATFORM_WIN32
-template class Nexus::Net::HttpServer<Win32SelectMUX, CPU_CORES>;
+    template class Nexus::Net::HttpsServer<Win32SelectMUX, CPU_CORES>;
 #endif

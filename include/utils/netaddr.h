@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 #include "../mem/memory.h"
-#include "../base/netdefs.h"
+#include "../base/def.h"
 
 #ifdef PLATFORM_WIN32
 #include "../platform/win32/win32_net.h"
@@ -13,10 +13,12 @@ namespace Nexus::Utils {
     class NetAddr {
     private:
         char inaddr_[sizeof(in6_addr)] {};
-        uint16_t port_;
-        SockType type_;
+        uint16_t port_ {0};
+        SockType type_ {SockType::INVALID};
+        std::string raw_addr_ {"invalid"};
     public:
-        explicit NetAddr(const std::string& addr, uint16_t port) : port_(htons(port)) {
+        NetAddr() = default;
+        explicit NetAddr(const std::string& addr, uint16_t port) : raw_addr_(addr), port_(htons(port)) {
             in_addr v4adr{};
             in6_addr v6adr{};
             if (inet_pton(AF_INET, addr.c_str(), &v4adr) == 1) {
@@ -45,6 +47,39 @@ namespace Nexus::Utils {
                         BREAKPOINT;
                     }
                 }
+            }
+        }
+
+        explicit NetAddr(sockaddr* addr) {
+            char ip[INET6_ADDRSTRLEN];
+            if (addr->sa_family == AF_INET) {
+                auto* sin = reinterpret_cast<sockaddr_in*>(addr);
+                if (inet_ntop(AF_INET, &sin->sin_addr, ip, sizeof(ip)) == nullptr) {
+                    raw_addr_ = "invalid address";
+                    port_ = sin->sin_port;
+                    type_ = SockType::SOCK_IPV4;
+                } else {
+                    raw_addr_ = ip;
+                    port_ = sin->sin_port;
+                    type_ = SockType::SOCK_IPV4;
+                }
+
+            } else if (addr->sa_family == AF_INET6) {
+                auto* sin = reinterpret_cast<sockaddr_in6*>(addr);
+                if (inet_ntop(AF_INET6, &sin->sin6_addr, ip, sizeof(ip)) == nullptr) {
+                    raw_addr_ = "invalid address";
+                    port_ = sin->sin6_port;
+                    type_ = SockType::SOCK_IPV6;
+                } else {
+                    raw_addr_ = ip;
+                    port_ = sin->sin6_port;
+                    type_ = SockType::SOCK_IPV6;
+                }
+
+            } else {
+                raw_addr_ = "invalid address";
+                port_ = 0;
+                type_ = SockType::INVALID;
             }
         }
 
@@ -100,6 +135,10 @@ namespace Nexus::Utils {
 
         uint16_t port() {
             return port_;
+        }
+
+        std::string url() {
+            return std::format("{}:{}", raw_addr_, ntohs(port_));
         }
     };
 }

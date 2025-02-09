@@ -8,5 +8,12 @@ namespace Nexus::Net {
         u_long arg = 1;
         return ioctlsocket(handle, FIONBIO, &arg) != SOCKET_ERROR;
     }
+    int GetLastNetworkError() {
+        return WSAGetLastError();
+    }
+    int GetLastSystemError() {
+        return GetLastError();
+    }
+
 
 }

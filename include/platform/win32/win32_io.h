@@ -59,4 +59,15 @@ namespace Nexus::IO {
         }
 
     };
+
+    inline static void EnableWindowsVirtualANSI() {
+#ifdef LOG_ANSI_SUPPORT
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (hOut == INVALID_HANDLE_VALUE) return;
+        DWORD dwMode = 0;
+        if (!GetConsoleMode(hOut, &dwMode)) return;
+        SetConsoleMode(hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+#endif
+    }
+
 }

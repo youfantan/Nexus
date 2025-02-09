@@ -18,14 +18,14 @@ namespace Nexus::Net {
         http_header_t headers_;
         uint64_t last_ {0};
         std::vector<uint64_t> marks_;
-        Nexus::Base::SharedPool<> pool_;
+        Nexus::Base::SharedPool<> buffer_;
         bool cached_ {false};
+
         bool find_end(const char* str, uint64_t size) {
             for (int i = 0; i < size; ++i) {
                 if (str[i] == '\r') {
                     marks_.push_back(last_ + i - 1);
                     if (str[i + 1] == '\n' && str[i + 2] == '\r' && str[i + 3] == '\n') {
-                        cached_ = true;
                         return true;
                     }
                 }
@@ -33,7 +33,7 @@ namespace Nexus::Net {
             return false;
         }
         std::pair<std::string, std::string> resolve_header(uint64_t beg, uint64_t end) {
-            char* ptr = &pool_[beg];
+            char* ptr = &buffer_[beg];
             uint64_t split = 0;
             bool space = false;
             for (int i = 0; i < end - beg; ++i) {
@@ -50,33 +50,35 @@ namespace Nexus::Net {
             return {key, value};
         }
     public:
-        explicit HttpResolver(Nexus::Base::SharedPool<>& pool) : pool_(pool) {}
+        explicit HttpResolver(Nexus::Base::SharedPool<>& pool) : buffer_(pool) {}
         bool header_ended() {
             if (cached_) return true;
             using namespace Nexus::Base;
-            if (find_end(&pool_[last_], pool_.limit() - last_)) return true;
-            last_ = pool_.limit();
+            if (find_end(&buffer_[last_], buffer_.limit() - last_)) return true;
+            last_ = buffer_.limit();
             return false;
         }
         http_header_t& resolve_headers() {
+            if (cached_) return headers_;
             uint64_t beg = marks_[0] + 3    ;
             for (int i = 1; i < marks_.size(); ++i) {
                 auto header = resolve_header(beg, marks_[i]);
                 headers_.emplace(header.first, header.second);
                 beg = marks_[i] + 3;
             }
+            cached_ = true;
             return headers_;
         }
         http_method resolve_method() {
-            if (pool_[0] == 'G' && pool_[1] == 'E' && pool_[2] == 'T') {
+            if (buffer_[0] == 'G' && buffer_[1] == 'E' && buffer_[2] == 'T') {
                 return http_method::GET;
-            } else if (pool_[0] == 'P' && pool_[1] == 'O' && pool_[2] == 'S' && pool_[3] == 'T') {
+            } else if (buffer_[0] == 'P' && buffer_[1] == 'O' && buffer_[2] == 'S' && buffer_[3] == 'T') {
                 return http_method::POST;
             }
             return http_method::UNSUPPORTED;
         }
         std::string resolve_path() {
-            char* beg = &pool_[0];
+            char* beg = &buffer_[0];
             uint64_t path_beg = 0;
             uint64_t path_end = 0;
             for (int i = 0; i < marks_[0] + 1; ++i) {
@@ -95,6 +97,7 @@ namespace Nexus::Net {
             }
             return {beg, path_beg, path_end - path_beg};
         }
+
         uint64_t resolve_header_end() {
             return marks_.back() + 4;
         }

@@ -1,25 +1,26 @@
 #pragma once
 
+#include "./https_connection.h"
 #include "./socket.h"
 #include "../utils/netaddr.h"
 #include "../io/mux.h"
-#include "http_connection.h"
 #include "http_handler.h"
 #include "../parallel/worker.h"
 
 namespace Nexus::Net {
     template<typename MUX, int N>
-    class HttpServer {
+    class HttpsServer {
     private:
         Nexus::IO::IOMultiplexer<MUX> iomux_;
-        std::unordered_map<io_handle_t, HttpConnection> connections_;
+        std::unordered_map<io_handle_t, HttpsConnection> connections_;
         std::unordered_map<std::string, HttpHandlerFunctionSet> handlers_;
         Socket sock_;
         bool flag_ {false};
+        SSL_CTX* ssl_ctx_;
         Nexus::Parallel::WorkGroup<N>& group_;
     public:
         // Establish a socket using given addresses
-        explicit HttpServer(Nexus::Utils::NetAddr addr, Nexus::Parallel::WorkGroup<N>& group);
+        explicit HttpsServer(Nexus::Utils::NetAddr addr, Nexus::Parallel::WorkGroup<N>& group);
         // Add http handler with given path
         template<typename H> requires IsHttpHandler<H>
         void add_handler(const std::string& path) {

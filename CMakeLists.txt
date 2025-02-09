@@ -13,6 +13,15 @@ add_executable(Nexus src/main.cpp
         include/net/http_connection.h
         include/net/http_handler.h
         include/io/resource_locator.h
+        include/net/https_server.h
+        src/net/https_server.cpp
+        include/net/https_connection.h
+        include/log/logger.h
+        include/io/terminal.h
+        src/platform/win32/win32_io.cpp
+        include/parallel/worker.h
+        include/net/basic_handlers.h
+        src/net/basic_handlers.cpp
 )
 add_executable(NexusTest test/test.cpp
         src/net/socket.cpp
@@ -20,6 +29,9 @@ add_executable(NexusTest test/test.cpp
         src/net/http_server.cpp
         include/net/http_resolver.h
         include/net/http_handler.h
+        src/net/https_server.cpp
 )
-target_link_libraries(Nexus ws2_32 Dnsapi)
+set(VCPKG_TARGET_TRIPLET "x64-mingw-static")
+find_package(OpenSSL REQUIRED)
+target_link_libraries(Nexus ws2_32 Dnsapi OpenSSL::Crypto OpenSSL::SSL)
 target_link_libraries(NexusTest ws2_32 Dnsapi)
