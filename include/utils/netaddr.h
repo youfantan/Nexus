@@ -18,6 +18,9 @@ namespace Nexus::Utils {
         std::string raw_addr_ {"invalid"};
     public:
         NetAddr() = default;
+        NetAddr(const NetAddr& addr) : port_(addr.port_), type_(addr.type_), raw_addr_(addr.raw_addr_) {
+            memcpy(inaddr_, addr.inaddr_, sizeof(in6_addr));
+        }
         explicit NetAddr(const std::string& addr, uint16_t port) : raw_addr_(addr), port_(htons(port)) {
             in_addr v4adr{};
             in6_addr v6adr{};

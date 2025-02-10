@@ -7,12 +7,38 @@
 #include "include/io/terminal.h"
 #include "include/platform/win32/win32_io.h"
 #include <thread>
+#include <dbghelp.h>
 
 using namespace Nexus::Base;
 using namespace Nexus::Utils;
 using namespace Nexus::Net;
 
+void CreateDump(EXCEPTION_POINTERS* pExceptionInfo) {
+    HANDLE hFile = CreateFile("crash.dmp", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        MINIDUMP_EXCEPTION_INFORMATION dumpInfo;
+        dumpInfo.ThreadId = GetCurrentThreadId();
+        dumpInfo.ExceptionPointers = pExceptionInfo;
+        dumpInfo.ClientPointers = FALSE;
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), hFile, MiniDumpWithFullMemory, &dumpInfo, nullptr, nullptr);
+        CloseHandle(hFile);
+    }
+}
+
+
+LONG WINAPI ExceptionHandler(EXCEPTION_POINTERS* pExceptionInfo) {
+    FILE* logFile = fopen("crash.log", "a");
+    if (logFile) {
+        fprintf(logFile, "Crash detected! Exception code: 0x%lX\n", pExceptionInfo->ExceptionRecord->ExceptionCode);
+        fprintf(logFile, "Fault address: 0x%p\n", pExceptionInfo->ExceptionRecord->ExceptionAddress);
+        fclose(logFile);
+    }
+    CreateDump(pExceptionInfo);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
 int main() {
+    SetUnhandledExceptionFilter(ExceptionHandler);
     using namespace Nexus::Net;
     using namespace Nexus::Utils;
     using namespace Nexus::Parallel;

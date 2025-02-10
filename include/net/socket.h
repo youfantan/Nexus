@@ -19,6 +19,7 @@ namespace Nexus::Net {
     public:
         Socket(io_handle_t fd, SockType typ, Nexus::Utils::NetAddr addr);
         explicit Socket(SockType typ);
+        Socket(const Socket& sock) : fd_(sock.fd_), invalid_(sock.invalid_), type_(sock.type_), addr_(sock.addr_) {}
         bool bind(const std::string& addr, uint16_t port);
         bool bind(sockaddr_in6 addrv6, uint16_t port);
         bool bind(sockaddr_in addrv4, uint16_t port);

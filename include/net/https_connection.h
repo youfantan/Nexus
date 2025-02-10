@@ -1,6 +1,7 @@
 #pragma once
 #include <chrono>
 #include <ranges>
+#include <utility>
 #include "./socket.h"
 #include "./http_resolver.h"
 #include "../utils/netaddr.h"
@@ -48,7 +49,7 @@ namespace Nexus::Net {
             established_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
         }
 
-        HttpsConnection(HttpsConnection&& conn) : sock_(conn.sock_), request_(std::move(conn.request_)), req_stream_(conn.req_stream_),
+        HttpsConnection(HttpsConnection&& conn)  noexcept : sock_(conn.sock_), request_(std::move(conn.request_)), req_stream_(conn.req_stream_),
         resolver_(std::move(conn.resolver_)), response_(std::move(conn.response_)), resp_stream_(conn.resp_stream_),
         handlers_(conn.handlers_), ssl_(conn.ssl_), mtx_(std::mutex{}), content_length_(conn.content_length_), established_time_(conn.established_time_), status_(conn.status_){}
 
@@ -56,11 +57,11 @@ namespace Nexus::Net {
             mtx_.lock();
             switch (status_) {
                 case HANDSHAKE: {
-                    int ret;
-                    do {
-                        ret = SSL_accept(ssl_);
-                    } while (ret == -1 && ((SSL_get_error(ssl_, ret) == SSL_ERROR_WANT_READ) || (SSL_get_error(ssl_, ret) == SSL_ERROR_WANT_WRITE)));
+                    int ret = SSL_accept(ssl_);
                     if (ret <= 0) {
+                        if ((SSL_get_error(ssl_, ret) == SSL_ERROR_WANT_READ) || (SSL_get_error(ssl_, ret) == SSL_ERROR_WANT_WRITE)) {
+                            break;
+                        }
                         int err = SSL_get_error(ssl_, ret);
                         ERR_print_errors_fp(stderr);
                         LWARN("SSL handshake error, closing TLS connection: {}. SSL ErrorCode: {}, Errno: {} | {}", sock_.addr().url(), err, GetLastNetworkError(), GetLastSystemError());

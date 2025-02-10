@@ -30,9 +30,7 @@ namespace Nexus::Parallel {
             while (!flag_) {
                 mtx_.lock();
                 if (!affair_queue_.empty()) {
-                    mtx_.unlock();
                     affair_queue_.front()();
-                    mtx_.lock();
                     affair_queue_.pop();
                 }
                 mtx_.unlock();

@@ -30,7 +30,8 @@ Nexus::Net::HttpsServer<MUX, N>::HttpsServer(Nexus::Utils::NetAddr addr, WorkGro
         LFATAL("Error occurred when reading SSL Certificate");
         exit(EXIT_FAILURE);
     }
-
+    SSL_CTX_set_min_proto_version(ctx, TLS1_1_VERSION);
+    SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION);
     if (SSL_CTX_use_PrivateKey_file(ctx, "server.key", SSL_FILETYPE_PEM) <= 0)
     {
         ERR_print_errors_fp(stderr);

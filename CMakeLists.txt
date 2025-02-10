@@ -3,7 +3,7 @@ project(Nexus)
 
 set(CMAKE_CXX_STANDARD 20)
 add_compile_definitions(PLATFORM_WIN32 _WINSOCK_DEPRECATED_NO_WARNINGS DEBUG)
-set(CMAKE_CXX_FLAGS -static-libstdc++)
+set(CMAKE_CXX_FLAGS "-static-libstdc++ -g")
 include_directories(.)
 add_executable(Nexus src/main.cpp
         src/net/socket.cpp
@@ -33,5 +33,5 @@ add_executable(NexusTest test/test.cpp
 )
 set(VCPKG_TARGET_TRIPLET "x64-mingw-static")
 find_package(OpenSSL REQUIRED)
-target_link_libraries(Nexus ws2_32 Dnsapi OpenSSL::Crypto OpenSSL::SSL)
+target_link_libraries(Nexus ws2_32 dbghelp Dnsapi OpenSSL::Crypto OpenSSL::SSL)
 target_link_libraries(NexusTest ws2_32 Dnsapi)
