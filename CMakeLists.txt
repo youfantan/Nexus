@@ -3,7 +3,8 @@ project(Nexus)
 
 set(CMAKE_CXX_STANDARD 20)
 add_compile_definitions(PLATFORM_WIN32 _WINSOCK_DEPRECATED_NO_WARNINGS DEBUG)
-set(CMAKE_CXX_FLAGS "-static-libstdc++ -g")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g -static-libstdc++")
+
 include_directories(.)
 add_executable(Nexus src/main.cpp
         src/net/socket.cpp

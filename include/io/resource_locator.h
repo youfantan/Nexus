@@ -73,33 +73,65 @@ namespace Nexus::IO {
     class ResourceLocator {
     public:
         struct Resource {
-            Resource(std::string m) : mime(std::move(m)) {}
-            Resource() = default;
-            Nexus::Base::SharedPool<> data {1024};
+            Nexus::Base::FixedPool<> data;
             std::string mime;
+            bool valid;
+            std::atomic<int> hit {0};
+            Resource(Nexus::Base::FixedPool<> data_, std::string  mime_, bool valid_) : data(std::move(data_)), mime(std::move(mime_)), valid(valid_) {}
+            Resource(const Resource& r) : data(r.data), mime(r.mime), valid(r.valid), hit(r.hit.load()) {}
         };
-        static Nexus::Utils::MayFail<Resource> LocateResource(const std::string& request_path) {
+    private:
+        static std::mutex mtx_;
+        static std::unordered_map<std::string, Resource> hotspot_map_;
+    public:
+        static uint64_t file_size(std::ifstream& fin)
+        {
+            auto b = fin.tellg();
+            fin.seekg(0, std::ifstream::end);
+            auto fos = fin.tellg();
+            unsigned long long filesize = fos;
+            fin.seekg(b, std::ifstream::beg);
+            return filesize;
+        }
+
+        static Resource LocateResource(const std::string& request_path) {
+            mtx_.lock();
             using namespace Nexus::Base;
             using namespace Nexus::Utils;
-            std::string pathstr("static");
-            pathstr.append(request_path);
-            std::filesystem::path path(pathstr);
-            if (!exists(path)) {
-                return failed;
-            }
-            Resource res;
-            if (mime_mapping.contains(path.extension().string())) res.mime = mime_mapping[path.extension().string()];
-            else res.mime = "application/octet-stream";
-            std::ifstream fs(path, std::ios::in | std::ios::binary);
-            char buf[1024];
-            while (fs) {
-                fs.read(buf, 1024);
-                if (fs.gcount() > 0) {
-                    res.data.write(buf, fs.gcount());
+            if (hotspot_map_.contains(request_path)) {
+                hotspot_map_.at(request_path).hit++;
+                mtx_.unlock();
+                return { hotspot_map_.at(request_path) };
+            } else {
+                std::string pathstr("static");
+                pathstr.append(request_path);
+                std::filesystem::path path(pathstr);
+                if (!exists(path)) {
+                    mtx_.unlock();
+                    return { Nexus::Base::FixedPool(nullptr, 0), {}, false };
                 }
+                std::ifstream fs(path, std::ios::in | std::ios::binary);
+                std::string mime;
+                if (mime_mapping.contains(path.extension().string())) mime = mime_mapping[path.extension().string()];
+                else mime = "application/octet-stream";
+                auto sz = file_size(fs);
+                char* mem = reinterpret_cast<char*>(malloc(sz));
+                Resource res(FixedPool(mem, sz), mime, true);
+                uint64_t readn = 0;
+                while (fs) {
+                    fs.read(mem + readn, 1024);
+                    if (fs.gcount() > 0) {
+                        readn += fs.gcount();
+                    }
+                }
+                fs.close();
+                hotspot_map_.emplace(request_path, res);
+                mtx_.unlock();
+                return res;
             }
-            fs.close();
-            return res;
         }
     };
+    inline std::mutex ResourceLocator::mtx_{};
+    inline std::unordered_map<std::string, ResourceLocator::Resource> ResourceLocator::hotspot_map_{};
+
 }

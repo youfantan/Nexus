@@ -35,14 +35,12 @@ namespace Nexus::Net {
         uint64_t content_length_ {0};
         std::mutex mtx_;
     public:
-        HttpConnection(Socket sock, std::unordered_map<std::string, HttpHandlerFunctionSet>& handlers) : sock_(sock), request_(1024), req_stream_(request_), resolver_(request_),
+        HttpConnection(const Socket& sock, std::unordered_map<std::string, HttpHandlerFunctionSet>& handlers) : sock_(sock), request_(1024), req_stream_(request_), resolver_(request_),
                                                                                                          response_(1024), resp_stream_(response_), handlers_(handlers), mtx_(std::mutex{}) {
             auto now = std::chrono::system_clock::now().time_since_epoch();
             established_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
         }
-        HttpConnection(HttpConnection&& conn) : sock_(conn.sock_), request_(std::move(conn.request_)), req_stream_(conn.req_stream_),
-        resolver_(std::move(conn.resolver_)), response_(std::move(conn.response_)), resp_stream_(conn.resp_stream_),
-        handlers_(conn.handlers_),  mtx_(std::mutex{}), content_length_(conn.content_length_), established_time_(conn.established_time_), status_(conn.status_){}
+
         void drive() {
             mtx_.lock();
             switch (status_) {
@@ -104,40 +102,34 @@ namespace Nexus::Net {
                                 path.append("index.html");
                             }
                             auto r = Nexus::IO::ResourceLocator::LocateResource(path);
-                            if (r.is_valid()) {
+                            if (r.valid) {
                                 response("200 OK", {
-                                        {"Content-Type", r.reference().mime}
-                                }, r.reference().data);
+                                        {"Content-Type", r.mime}
+                                }, r.data);
                             } else {
-                                Nexus::Base::SharedPool<> resp(1024);
-                                std::string str = "<html><body><h1>404 Not Found</h1><p>Server: Nexus@BetaV1</p></body></html>";
-                                resp.write(str.data(), str.size());
                                 response("404 Not Found", {
                                         {"Content-Type", "text/html"}
-                                }, resp);
+                                }, Nexus::Base::FixedPool(get_not_found_resp.data(), get_not_found_resp.size()));
                             }
                         }
                     } else if (resolver_.resolve_method() == http_method::POST) {
-                        Nexus::Base::SharedPool<> body(1024);
-                        body.write(&request_[resolver_.resolve_header_end() + 1], content_length_);
+                        char* body = reinterpret_cast<char*>(malloc(content_length_));
+                        memcpy(body, &request_[resolver_.resolve_header_end() + 1], content_length_);
                         auto path = resolver_.resolve_path();
                         LINFO("New Http Request: POST /{} from {}", path, sock_.addr().url());
                         if (handlers_.contains(path)) {
                             HttpHandlerFunctionSet &fs = handlers_.at(path);
-                            post_request pr{resolver_.resolve_headers(), body};
+                            post_request pr{resolver_.resolve_headers(), Nexus::Base::FixedPool<true, Nexus::Base::HeapAllocator>(body, content_length_)};
                             http_response resp = fs.post(pr);
                             if (resp.response_body.limit() == 0) {
                                 response(resp.response_type, resp.response_header);
                             } else {
-                                response(resp.response_type, resp.response_header, resp.response_body);
+                                response<true>(resp.response_type, resp.response_header, resp.response_body);
                             }
                         } else {
-                            Nexus::Base::SharedPool<> resp(1024);
-                            std::string str = "Handler Not Found | Nexus@BetaV1";
-                            resp.write(str.data(), str.size());
                             response("404 Not Found", {
                                     {"Content-Type", "text/plain"}
-                            }, resp);
+                            }, Nexus::Base::FixedPool(post_not_found_resp.data(), post_not_found_resp.size()));
                         }
                     }
                     break;
@@ -167,8 +159,8 @@ namespace Nexus::Net {
         status_t status() {
             return status_;
         }
-
-        void response(const std::string& status, const http_header_t& headers, Nexus::Base::SharedPool<>& content) {
+        template<bool auto_free = false>
+        void response(const std::string& status, const http_header_t& headers, const Nexus::Base::FixedPool<auto_free>& content) {
             status_ = RESPONSE;
             std::stringstream ss;
             ss << "HTTP/1.1 ";
@@ -180,9 +172,10 @@ namespace Nexus::Net {
             auto prefix = ss.str();
             response_.write(prefix.data(), prefix.size());
             response_.write("\r\n", 2);
-            response_.write(&content[0], content.limit());
+            response_.write(content.ptr(), content.limit());
             resp_stream_.position(0);
         }
+
         void response(const std::string& status, const http_header_t& headers) {
             status_ = RESPONSE;
             std::stringstream ss;

@@ -37,8 +37,8 @@ namespace Nexus::Base {
             return ptr;
         }
 
-        bool recycle(char* ptr, uint64_t size) {
-            free(ptr);
+        bool recycle(const void* ptr, uint64_t size) {
+            free((void *) ptr);
             return true;
         }
     };
@@ -55,12 +55,22 @@ namespace Nexus::Base {
     static char fixed_array_type_for_constraint[4] = {1, 2, 3, 4};
 
     template<typename C>
-    concept ContainerStreamable = requires(C c) {
+    concept ContainerInputStreamable = requires(C c) {
         { c.template next<plain_type_for_constraint>() } -> std::same_as<Nexus::Utils::MayFail<plain_type_for_constraint>>;
-        { c.template next<plain_type_for_constraint>(plain_type_for_constraint()) } -> std::same_as<bool>;
         { c.template next<decltype(fixed_array_type_for_constraint)>() } -> std::same_as<Nexus::Utils::MayFail<decltype(fixed_array_type_for_constraint)>>;
-        { c.template next<decltype(fixed_array_type_for_constraint)>(fixed_array_type_for_constraint) } -> std::same_as<bool>;
         { c.read(UINT64_MAX) } -> std::same_as<Nexus::Utils::MayFail<UniqueFlexHolder<char>>>;
+        { c.rewind() };
+        { c.position() } -> std::same_as<uint64_t&>;
+        { c.limit() } -> std::same_as<uint64_t>;
+        { c.position(UINT64_MAX) };
+        { c.flag() } -> std::same_as<typename C::flag_t>;
+        { c.close() };
+    };
+
+    template<typename C>
+    concept ContainerOutputStreamable = requires(C c) {
+        { c.template next<plain_type_for_constraint>(plain_type_for_constraint()) } -> std::same_as<bool>;
+        { c.template next<decltype(fixed_array_type_for_constraint)>(fixed_array_type_for_constraint) } -> std::same_as<bool>;
         { c.write(nullptr, UINT64_MAX) } -> std::same_as<bool>;
         { c.rewind() };
         { c.position() } -> std::same_as<uint64_t&>;
@@ -142,7 +152,7 @@ namespace Nexus::Base {
         }
     };
 
-    template<typename C> requires ContainerStreamable<C>
+    template<typename C> requires ContainerInputStreamable<C> && ContainerOutputStreamable<C>
     class Stream {
     private:
         C container_;
@@ -210,6 +220,142 @@ namespace Nexus::Base {
             container_.close();
         }
         ~Stream() {
+            close();
+        }
+    };
+
+    template<typename C> requires ContainerInputStreamable<C>
+    class InputStream {
+    private:
+        C container_;
+    public:
+        /* Construct stream with a reference of container. */
+        explicit InputStream(const C& container) : container_(container) {}
+        /* Construct stream with a right reference of container. */
+        explicit InputStream(C&& container) : container_(std::move(container)) {}
+        /* Read the next data. */
+        template<typename T> requires IsSimpleType<T>
+        Nexus::Utils::MayFail<T> next() {
+            return container_.template next<T>();
+        }
+
+        /* Read the next data which type is fixed array. */
+        template<typename T, size_t S> requires IsSimpleType<T>
+        Nexus::Utils::MayFail<T[S]> next() {
+            return container_.template next<T[S]>();
+        }
+
+        /* Read data in specified size. */
+        Nexus::Utils::MayFail<UniqueFlexHolder<char>> read(uint64_t len) {
+            return container_.read(len);
+        }
+
+        /* Rewind the container. */
+        void rewind() {
+            container_.rewind();
+        }
+
+        /* Get the position of container. */
+        uint64_t& position() {
+            return container_.position();
+        }
+
+        /* Set the position of container. */
+        void position(uint64_t npos) {
+            container_.position(npos);
+        }
+
+        /* Get the limit of container */
+        uint64_t limit() {
+            return container_.limit();
+        }
+
+        /* Get the last operation flag of container. */
+        C::flag_t flag() {
+            return container_.flag();
+        }
+
+        /* Get the reference of the container. */
+        C& container() {
+            return container_;
+        }
+
+        /* Call this function only when you need to release the container before Stream destruction automatically. When Stream is being
+         * destructed, it will close the container.  */
+        void close() {
+            container_.close();
+        }
+
+        ~InputStream() {
+            close();
+        }
+    };
+
+    template<typename C> requires ContainerOutputStreamable<C>
+    class OutputStream {
+    private:
+        C container_;
+    public:
+        /* Construct stream with a reference of container. */
+        explicit OutputStream(const C& container) : container_(container) {}
+        /* Construct stream with a right reference of container. */
+        explicit OutputStream(C&& container) : container_(std::move(container)) {}
+
+        /* Write the next data. */
+        template<typename T> requires IsSimpleType<T>
+        bool next(T t) {
+            return container_.next(t);
+        }
+
+        /* Write the next data which type is fixed array. */
+        template<typename T, size_t S> requires IsSimpleType<T>
+        bool next(T(&t)[S]) {
+            return container_.next(t);
+        }
+
+        /* Write data in specified size. */
+        bool write(char* ptr, uint64_t len) {
+            return container_.write(ptr, len);
+
+        }
+
+        /* Rewind the container. */
+        void rewind() {
+            container_.rewind();
+        }
+
+        /* Get the position of container. */
+        uint64_t& position() {
+            return container_.position();
+        }
+
+        /* Set the position of container. */
+        void position(uint64_t npos) {
+            container_.position(npos);
+        }
+
+        /* Get the limit of container */
+        uint64_t limit() {
+            return container_.limit();
+        }
+
+        /* Get the last operation flag of container. */
+        C::flag_t flag() {
+            return container_.flag();
+        }
+
+        /* Get the reference of the container. */
+        C& container() {
+            return container_;
+        }
+
+        /* Call this function only when you need to release the container before Stream destruction automatically. When Stream is being
+         * destructed, it will close the container.  */
+        void close() {
+            container_.close();
+        }
+
+        ~OutputStream() {
             close();
         }
     };
@@ -286,7 +432,7 @@ namespace Nexus::Base {
         }
 
         /* Write data in specified size with specified position. */
-        bool write(char* ptr, uint64_t off, uint64_t len) {
+        bool write(const char* ptr, uint64_t off, uint64_t len) {
             if (off + len > capacity_) {
                 if (BIT_SELECT(settings_, 0)) {
                     expand((off + len - capacity_) > single_automatic_expand_length ? (off + len - capacity_) : single_automatic_expand_length);
@@ -299,7 +445,7 @@ namespace Nexus::Base {
         }
 
         /* Write data in specified size with position. */
-        bool write(char* ptr, uint64_t len) {
+        bool write(const char* ptr, uint64_t len) {
             flag_ = flag_t::normal;
             if (position_ + len > capacity_) {
                 if (BIT_SELECT(settings_, 0)) {
@@ -330,13 +476,18 @@ namespace Nexus::Base {
             return false;
         }
         /* Call this function only when you need to release the memory data before UniquePool destruction automatically. When UniquePool is being
-         * destructed, it will release the memory pointer if the auto_free flag in settings_ is true.*/
+         * destructed, it will release the memory pointer if the auto_free_ flag in settings_ is true.*/
         void release() {
             if (BIT_SELECT(settings_, 1) && memptr_ != nullptr) {
                 allocator_.recycle(memptr_, capacity_);
                 memptr_ = nullptr;
             }
         }
+
+        uint64_t capacity() {
+            return capacity_;
+        }
+
         ~UniquePool() {
             release();
         }
@@ -598,7 +749,7 @@ namespace Nexus::Base {
         }
 
         /* Call this function only when you need to release the memory data before SharedPool destruction automatically. When SharedPool is being
-         * destructed, it will release the memory pointer if the auto_free flag in settings_ is true.*/
+         * destructed, it will release the memory pointer if the auto_free_ flag in settings_ is true.*/
         void release() {
             if (memholder_ != nullptr) {
                 if (!adjust_refcount(-1)) {
@@ -724,4 +875,144 @@ namespace Nexus::Base {
             release();
         }
     };
+
+    /*
+      * FixedPool is read-only, it only be used to transform section data, such as a part of a memory pool.
+      * */
+    template<bool auto_free = false, typename A = HeapAllocator> requires IsAllocator<A>
+    class FixedPool {
+        template<typename U>
+        friend inline FixedPool<true, U> unique_to_readonly(UniquePool<U>&& up);
+    public:
+        using settings = char;
+        enum class flag_t {
+            eof,
+            normal
+        };
+    private:
+        const char* memptr_;
+        uint64_t capacity_;
+        uint64_t position_ {0};
+        uint64_t& limit_ {capacity_};
+        flag_t flag_ {flag_t::normal};
+        A allocator_ {};
+    public:
+        /* Use FixedPool to manage a pointer and carefully confirm the life cycle of the pointer. */
+        FixedPool(const char* memptr, uint64_t size) : memptr_(memptr), capacity_(size) {}
+        /* FixedPool can be copied. */
+        FixedPool(const FixedPool& up) : memptr_(up.memptr_), capacity_(up.capacity_), allocator_(up.allocator_) {
+            if constexpr (auto_free) {
+                static_assert("When auto_free is specified, the copy constructor is not allowed.");
+            }
+        }
+        /* FixedPool can be moved. */
+        FixedPool(FixedPool&& up) noexcept : memptr_(up.memptr_), capacity_(up.capacity_), allocator_(up.allocator_) {
+            up.memptr_ = nullptr;
+            up.capacity_ = 0;
+        }
+
+        /* Direct access to the buffer. */
+        const char* ptr() const {
+            return memptr_;
+        }
+        /* Read data in specified size with specified position. */
+        Nexus::Utils::MayFail<UniqueFlexHolder<char>> read(uint64_t off, uint64_t len) {
+            flag_ = flag_t::normal;
+            if (position_ >= capacity_) {
+                flag_ = flag_t::eof;
+                return Nexus::Utils::failed;
+            }
+            if (position_ + len >= capacity_) {
+                len = capacity_ - position_;
+            }
+            auto data = UniqueFlexHolder<char>(len);
+            memcpy(&data.get(), memptr_ + position_, len);
+            position_ += len;
+            return data;
+        }
+
+        /* Read data in specified size with position. */
+        Nexus::Utils::MayFail<UniqueFlexHolder<char>> read(uint64_t len) {
+            flag_ = flag_t::normal;
+            if ((position_ + len) > capacity_) {
+                flag_ = flag_t::eof;
+                return Nexus::Utils::failed;
+            }
+            auto data = UniqueFlexHolder<char>(len);
+            memcpy(&data.get(), memptr_ + position_, len);
+            position_ += len;
+            return data;
+        }
+
+        ~FixedPool() {
+            if (memptr_ != nullptr) {
+                if constexpr (auto_free) {
+                    allocator_.recycle(memptr_, capacity_);
+                }
+            }
+            memptr_ = nullptr;
+        }
+
+
+        template<typename T> requires IsSimpleType<T>
+        Nexus::Utils::MayFail<T> next()  {
+            constexpr auto step = sizeof(T);
+            flag_ = flag_t::normal;
+            if (position_ + step >= capacity_) {
+                flag_ = flag_t::eof;
+                if (position_ + step > capacity_) return Nexus::Utils::failed;
+            }
+            T d{};
+            memcpy(&d, memptr_ + position_, step);
+            position_ += step;
+            return d;
+        }
+
+        template<typename T, size_t S> requires IsSimpleType<T>
+        Nexus::Utils::MayFail<T(&)[S]> next() {
+            constexpr auto size = sizeof(T) * S;
+            flag_ = flag_t::normal;
+            if (position_ + size >= capacity_) {
+                flag_ = flag_t::eof;
+                if (position_ + size > capacity_) return Nexus::Utils::failed;
+            }
+            T d{};
+            memcpy(&d[0], memptr_ + position_, size);
+            position_ += size;
+            return d;
+        }
+
+        void rewind() {
+            position_ = 0;
+        }
+
+        uint64_t& position() {
+            return position_;
+        }
+
+        void position(uint64_t npos) {
+            position_ = npos;
+        }
+
+        uint64_t limit() const {
+            return limit_;
+        }
+
+        flag_t flag() {
+            return flag_;
+        }
+
+        void close() {
+            memptr_ = nullptr;
+        }
+
+    };
+
+    template<typename A>
+    inline FixedPool<true, A> unique_to_readonly(UniquePool<A>&& up) {
+        up.apply_settings(0b00000000);
+        FixedPool<true, A> pool(&up[0], up.capacity());
+        pool.limit_ = up.limit();
+        return pool;
+    }
 }

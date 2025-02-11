@@ -61,6 +61,7 @@ namespace Nexus::Log {
         std::cout << consolemsg << std::endl;
         lf.write(msg.c_str(), static_cast<int>(msg.size()));
         lf.write("\r\n", 2);
+        lf.flush();
     }
 }
 

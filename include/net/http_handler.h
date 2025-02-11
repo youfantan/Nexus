@@ -10,7 +10,7 @@ using http_header_t = std::unordered_map<std::string, std::string>;
 using http_response = struct {
     std::string response_type;
     http_header_t response_header;
-    Nexus::Base::SharedPool<> response_body;
+    Nexus::Base::FixedPool<true, Nexus::Base::HeapAllocator> response_body;
 };
 
 using get_request = struct {
@@ -19,7 +19,7 @@ using get_request = struct {
 
 using post_request = struct {
     http_header_t request_handler;
-    Nexus::Base::SharedPool<> request_body;
+    Nexus::Base::FixedPool<true, Nexus::Base::HeapAllocator> request_body;
 };
 
 using GetFunction = std::function<http_response(get_request&)>;
@@ -33,5 +33,5 @@ struct HttpHandlerFunctionSet {
 template<typename H>
 concept IsHttpHandler = requires {
     { H::doGet(get_request{}) } -> std::same_as<http_response>;
-    { H::doPost(post_request{{}, Nexus::Base::SharedPool<>{1024}}) } -> std::same_as<http_response>;
+    { H::doPost(post_request{{}, Nexus::Base::FixedPool<true, Nexus::Base::HeapAllocator>(nullptr, 1024)}) } -> std::same_as<http_response>;
 };

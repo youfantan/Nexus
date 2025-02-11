@@ -55,9 +55,9 @@ int main() {
         LFATAL("WSAStartup Failed. Error Code: {}", err);
         return 0;
     }
-    WorkGroup<CPU_CORES> group;
-    HttpsServer<Nexus::IO::Win32SelectMUX, CPU_CORES> https(NetAddr("0.0.0.0", 443), group);
-    HttpServer <Nexus::IO::Win32SelectMUX, CPU_CORES> http(NetAddr("0.0.0.0", 80), group);
+    WorkGroup<CPU_CORES - 1> group;
+    HttpsServer<Nexus::IO::Win32SelectMUX, CPU_CORES - 1> https(NetAddr("0.0.0.0", 443), group);
+    HttpServer <Nexus::IO::Win32SelectMUX, CPU_CORES - 1> http(NetAddr("0.0.0.0", 80), group);
     https.add_handler<statistics_handler>("/statistics");
     http.add_handler<statistics_handler>("/statistics");
     while (true) {

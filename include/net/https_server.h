@@ -12,7 +12,7 @@ namespace Nexus::Net {
     class HttpsServer {
     private:
         Nexus::IO::IOMultiplexer<MUX> iomux_;
-        std::unordered_map<io_handle_t, HttpsConnection> connections_;
+        std::unordered_map<io_handle_t, std::shared_ptr<HttpsConnection>> connections_;
         std::unordered_map<std::string, HttpHandlerFunctionSet> handlers_;
         Socket sock_;
         bool flag_ {false};
