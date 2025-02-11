@@ -26,7 +26,7 @@ namespace Nexus::Net {
         std::unordered_map<std::string, HttpHandlerFunctionSet>& handlers_;
         Socket sock_;
         uint64_t established_time_;
-        Nexus::Base::SharedPool<> request_;
+        Nexus::Base::SharedPool<Nexus::Base::AlignedHeapAllocator<4>> request_;
         Nexus::Base::Stream<decltype(request_)> req_stream_;
         Nexus::Base::SharedPool<> response_;
         Nexus::Base::Stream<decltype(response_)> resp_stream_;
@@ -86,7 +86,7 @@ namespace Nexus::Net {
                 case EXECUTING: {
                     executed_sock++;
                     if (resolver_.resolve_method() == http_method::GET) {
-                        auto path = resolver_.resolve_path();\
+                        auto path = resolver_.resolve_path();
                         LINFO("New Http Request: GET {} from {}", path, sock_.addr().url());
                         if (handlers_.contains(path)) {
                             HttpHandlerFunctionSet& fs = handlers_.at(path);

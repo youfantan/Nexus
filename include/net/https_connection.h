@@ -34,7 +34,7 @@ namespace Nexus::Net {
         std::unordered_map<std::string, HttpHandlerFunctionSet>& handlers_;
         Socket sock_;
         uint64_t established_time_;
-        Nexus::Base::SharedPool<> request_;
+        Nexus::Base::SharedPool<Nexus::Base::AlignedHeapAllocator<4>> request_;
         Nexus::Base::Stream<decltype(request_)> req_stream_;
         Nexus::Base::SharedPool<> response_;
         Nexus::Base::Stream<decltype(response_)> resp_stream_;

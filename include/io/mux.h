@@ -10,9 +10,6 @@
 #endif
 
 namespace Nexus::IO {
-#define IO_EVREAD 0x80000000
-#define IO_EVWRITE 0x40000000
-#define IO_EVEXCETION 0x20000000
 #define MSK_SEL(dat, mask) (((dat) & (mask)) == (mask))
 #define MSK_SET(dat, mask) ((dat) |= (mask))
 #define EVMAX 1024
@@ -27,6 +24,9 @@ namespace Nexus::IO {
     template<typename MUX>
     concept IsMultiplexer = requires(MUX mux) {
         MUX();
+        { MUX::EVREAD } -> std::same_as<uint32_t&>;
+        { MUX::EVWRITE } -> std::same_as<uint32_t&>;
+        { MUX::EVEXCEPTION } -> std::same_as<uint32_t&>;
         { mux.poll(-INT32_MAX) } -> std::same_as<Nexus::Utils::MayFail<std::vector<io_ev>>>;
         { mux.add(HANDLE_MAX, UINT32_MAX) } -> std::same_as<bool>;
         { mux.remove(HANDLE_MAX) };

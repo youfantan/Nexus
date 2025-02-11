@@ -18,6 +18,31 @@ namespace Nexus::Base {
         { a.reallocate(nullptr, UINT64_MAX, UINT64_MAX) } -> std::convertible_to<char*>;
         { a.recycle(nullptr, UINT64_MAX) } -> std::same_as<bool>;
     };
+    template<uint8_t N>
+    class AlignedHeapAllocator {
+    public:
+        char* allocate(uint64_t size) {
+            char* ptr;
+            if ((ptr = reinterpret_cast<char*>(_aligned_malloc(size, N))) == nullptr) {
+                throw std::bad_alloc();
+            }
+            memset(ptr, 0, size);
+            return ptr;
+        }
+
+        char* reallocate(char* old_ptr, uint64_t old_size, uint64_t new_size) {
+            char* ptr;
+            if ((ptr = reinterpret_cast<char*>(_aligned_realloc(old_ptr, new_size, N))) == nullptr) {
+                throw std::bad_alloc();
+            }
+            return ptr;
+        }
+
+        bool recycle(const void* ptr, uint64_t size) {
+            _aligned_free((void *) ptr);
+            return true;
+        }
+    };
 
     class HeapAllocator {
     public:

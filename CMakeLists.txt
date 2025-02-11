@@ -2,9 +2,9 @@ cmake_minimum_required(VERSION 3.28)
 project(Nexus)
 
 set(CMAKE_CXX_STANDARD 20)
-add_compile_definitions(PLATFORM_WIN32 _WINSOCK_DEPRECATED_NO_WARNINGS DEBUG)
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g -static-libstdc++")
-
+add_compile_definitions(PLATFORM_WIN32 _WINSOCK_DEPRECATED_NO_WARNINGS DEBUG __SSE4_2__)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS_RELEASE} -static-libstdc++ -msse4.2 -march=native")
+add_compile_options(-msse4.2)
 include_directories(.)
 add_executable(Nexus src/main.cpp
         src/net/socket.cpp
@@ -23,6 +23,7 @@ add_executable(Nexus src/main.cpp
         include/parallel/worker.h
         include/net/basic_handlers.h
         src/net/basic_handlers.cpp
+        thirdparty/picohttpparser/picohttpparser.c
 )
 add_executable(NexusTest test/test.cpp
         src/net/socket.cpp

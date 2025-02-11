@@ -2,9 +2,9 @@
 
 #include "../mem/memory.h"
 #include "./http_handler.h"
+#include "../../thirdparty/picohttpparser/picohttpparser.h"
 #include <iostream>
 #include <unordered_map>
-
 namespace Nexus::Net {
 
     enum class http_method {
@@ -16,90 +16,60 @@ namespace Nexus::Net {
     class HttpResolver {
     private:
         http_header_t headers_;
-        uint64_t last_ {0};
-        std::vector<uint64_t> marks_;
-        Nexus::Base::SharedPool<> buffer_;
+        std::string method_;
+        std::string path_;
+        uint64_t request_len_;
+        Nexus::Base::SharedPool<Nexus::Base::AlignedHeapAllocator<4>> buffer_;
         bool cached_ {false};
-
-        bool find_end(const char* str, uint64_t size) {
-            for (int i = 0; i < size; ++i) {
-                if (str[i] == '\r') {
-                    marks_.push_back(last_ + i - 1);
-                    if (str[i + 1] == '\n' && str[i + 2] == '\r' && str[i + 3] == '\n') {
-                        return true;
-                    }
+        bool resolve(const char* str, uint64_t size) {
+            const char *method, *path;
+            size_t method_len, path_len;
+            int minor_version;
+            struct phr_header headers[64];
+            size_t num_headers = sizeof(headers) / sizeof(headers[0]);
+            int ret = phr_parse_request(
+                    str, size,
+                    &method, &method_len,
+                    &path, &path_len,
+                    reinterpret_cast<int *>(&minor_version),
+                    headers, &num_headers, 0
+            );
+            if (ret > 0) {
+                for (int i = 0; i < num_headers; ++i) {
+                    cached_ = true;
+                    headers_.emplace(std::string(headers[i].name, headers[i].name_len), std::string(headers[i].value, headers[i].value_len));
                 }
+                method_ = std::string(method, method_len);
+                path_ = std::string(path, path_len);
+                request_len_ = ret;
+                return true;
+            } else {
+                return false;
             }
-            return false;
-        }
-        std::pair<std::string, std::string> resolve_header(uint64_t beg, uint64_t end) {
-            char* ptr = &buffer_[beg];
-            uint64_t split = 0;
-            bool space = false;
-            for (int i = 0; i < end - beg; ++i) {
-                if (ptr[i] == ':') {
-                    split = i;
-                    if (ptr[i + 1] == ' ') {
-                        space = true;
-                    }
-                }
-            }
-            std::string key(ptr, split);
-            auto kb = space ? split + 2 : split + 1;
-            std::string value(ptr + kb, end - beg - kb + 1);
-            return {key, value};
         }
     public:
-        explicit HttpResolver(Nexus::Base::SharedPool<>& pool) : buffer_(pool) {}
+        explicit HttpResolver(Nexus::Base::SharedPool<Nexus::Base::AlignedHeapAllocator<4>>& pool) : buffer_(pool) {}
         bool header_ended() {
-            if (cached_) return true;
             using namespace Nexus::Base;
-            if (find_end(&buffer_[last_], buffer_.limit() - last_)) return true;
-            last_ = buffer_.limit();
-            return false;
+            return (resolve(&buffer_[0], buffer_.limit()));
         }
         http_header_t& resolve_headers() {
-            if (cached_) return headers_;
-            uint64_t beg = marks_[0] + 3    ;
-            for (int i = 1; i < marks_.size(); ++i) {
-                auto header = resolve_header(beg, marks_[i]);
-                headers_.emplace(header.first, header.second);
-                beg = marks_[i] + 3;
-            }
-            cached_ = true;
             return headers_;
         }
         http_method resolve_method() {
-            if (buffer_[0] == 'G' && buffer_[1] == 'E' && buffer_[2] == 'T') {
+            if (method_ == "GET") {
                 return http_method::GET;
-            } else if (buffer_[0] == 'P' && buffer_[1] == 'O' && buffer_[2] == 'S' && buffer_[3] == 'T') {
+            } else if (method_ == "POST") {
                 return http_method::POST;
             }
             return http_method::UNSUPPORTED;
         }
         std::string resolve_path() {
-            char* beg = &buffer_[0];
-            uint64_t path_beg = 0;
-            uint64_t path_end = 0;
-            for (int i = 0; i < marks_[0] + 1; ++i) {
-                if (path_beg == 0) {
-                    if (beg[i] == '/') {
-                        path_beg = i;
-                    }
-                } else {
-                    if (beg[i] == ' ') {
-                        path_end = i;
-                    }
-                }
-            }
-            if (path_beg == 0 || path_end == 0) {
-                return {};
-            }
-            return {beg, path_beg, path_end - path_beg};
+            return path_;
         }
 
         uint64_t resolve_header_end() {
-            return marks_.back() + 4;
+            return request_len_;
         }
     };
 }

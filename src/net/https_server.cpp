@@ -1,10 +1,4 @@
 #include <include/net/https_server.h>
-#include <include/net/http_resolver.h>
-#include <include/log/logger.h>
-#ifdef PLATFORM_WIN32
-#include <include/platform/win32/win32_io.h>
-#endif
-
 #include <unordered_map>
 
 using namespace Nexus::IO;
@@ -45,7 +39,7 @@ Nexus::Net::HttpsServer<MUX, N>::HttpsServer(Nexus::Utils::NetAddr addr, WorkGro
     }
     sock_.listen();
     sock_.setnonblocking();
-    iomux_.add(sock_.fd(), IO_EVREAD);
+    iomux_.add(sock_.fd(), MUX::EVREAD);
     LINFO("Https Server started on {}", addr.url());
 }
 template<typename MUX, int N>
@@ -63,7 +57,7 @@ void Nexus::Net::HttpsServer<MUX, N>::HttpsServer::loop() {
                 SSL* ssl = SSL_new(ssl_ctx_);
                 SSL_set_fd(ssl, client.fd());
                 client.setnonblocking();
-                iomux_.add(client.fd(), IO_EVREAD | IO_EVWRITE);
+                iomux_.add(client.fd(), MUX::EVREAD | MUX::EVWRITE);
                 std::shared_ptr conn = std::make_shared<HttpsConnection>(client, handlers_, ssl);
                 connections_.insert(std::make_pair(client.fd(), conn));
                 LINFO("New TLS Connection created: {}", client.addr().url());
@@ -112,4 +106,5 @@ void Nexus::Net::HttpsServer<MUX, N>::HttpsServer::close() {
 
 #ifdef PLATFORM_WIN32
     template class Nexus::Net::HttpsServer<Win32SelectMUX, CPU_CORES - 1>;
+    template class Nexus::Net::HttpsServer<Win32PollMUX, CPU_CORES - 1>;
 #endif

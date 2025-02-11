@@ -7,7 +7,7 @@ enum class SockType {
     INVALID
 };
 
-constexpr int CPU_CORES = 2;
+constexpr int CPU_CORES = 12;
 
 static inline constexpr std::string_view get_not_found_resp = "<html><body><h1>404 Not Found</h1><p>Server: Nexus@BetaV1</p></body></html>";
 static inline constexpr std::string_view post_not_found_resp = "Handler Not Found | Nexus@BetaV1";

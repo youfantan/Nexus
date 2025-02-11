@@ -20,8 +20,8 @@ Nexus::Net::HttpServer<MUX, N>::HttpServer::HttpServer(Nexus::Utils::NetAddr add
     }
     sock_.listen();
     LINFO("Http Server started on {}", addr.url());
-    sock_.setnonblocking();
-    iomux_.add(sock_.fd(), IO_EVREAD);
+    auto b = sock_.setnonblocking();
+    iomux_.add(sock_.fd(), MUX::EVREAD);
 }
 
 template<typename MUX, int N>
@@ -37,8 +37,8 @@ void Nexus::Net::HttpServer<MUX, N>::HttpServer::loop() {
                     continue;
                 }
                 client.setnonblocking();
-                iomux_.add(client.fd(), IO_EVREAD | IO_EVWRITE);
-                std::shared_ptr<HttpConnection> conn = std::make_shared<HttpConnection>(client, handlers_   );
+                iomux_.add(client.fd(), MUX::EVREAD | MUX::EVWRITE);
+                std::shared_ptr<HttpConnection> conn = std::make_shared<HttpConnection>(client, handlers_);
                 connections_.insert(std::make_pair(client.fd(), conn));
                 LINFO("New Socket Connection created: {}", client.addr().url());
             } else {
@@ -85,4 +85,5 @@ void Nexus::Net::HttpServer<MUX, N>::HttpServer::close() {
 
 #ifdef PLATFORM_WIN32
 template class Nexus::Net::HttpServer<Win32SelectMUX, CPU_CORES - 1>;
+template class Nexus::Net::HttpServer<Win32PollMUX, CPU_CORES - 1>;
 #endif
