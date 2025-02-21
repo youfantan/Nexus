@@ -781,7 +781,7 @@ namespace Nexus::Base {
                     allocator_.recycle(*memholder_, *capacity_);
                     allocator_.recycle(reinterpret_cast<char*>(memholder_), sizeof(char*));
                     memholder_ = nullptr;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10)); // wait 10ms to make sure all the conflicting threads could pass.
+                    //std::this_thread::sleep_for(std::chrono::milliseconds(10)); // wait 10ms to make sure all the conflicting threads could pass.
                     delete mtx;
                     mtx = nullptr;
                     allocator_.recycle(reinterpret_cast<char*>(reference_counting), sizeof(int64_t));
